@@ -126,13 +126,13 @@ create policy "public_select" on public.challenges for select using (true);
 revoke all on public.challenges from anon, authenticated;
 grant select on public.challenges to anon, authenticated;
 
+-- One row per day marked complete. Absence = not complete.
 create table public.challenge_checks (
   id           uuid primary key default gen_random_uuid(),
   challenge_id uuid not null references public.challenges(id) on delete cascade,
-  rule_id      text not null,
   date         date not null,
   created_at   timestamptz not null default now(),
-  unique (challenge_id, rule_id, date)
+  unique (challenge_id, date)
 );
 
 create index challenge_checks_challenge_date_idx

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getHomeData, getDiary } from "@/lib/challenges";
 import { Calendar } from "@/components/Calendar";
-import { ChecklistRow } from "@/components/ChecklistRow";
+import { DayCompleteToggle } from "@/components/DayCompleteToggle";
 import { DiaryEditor } from "@/components/DiaryEditor";
 import { LockButton } from "@/components/LockButton";
 import { AbandonAttemptButton } from "@/components/AttemptControls";
@@ -18,10 +18,8 @@ export default async function Home({
   const isAdmin = data.is_admin;
   const modalOpen = typeof sp.d === "string" && sp.d.length > 0;
 
-  // Editable when admin is unlocked AND the selected day is today.
   const canEdit = isAdmin && data.selected.is_today;
 
-  // Diary content is admin-only; getDiary returns "" for non-admin.
   const selectedDiary =
     isAdmin && modalOpen ? await getDiary(data.selected.date) : "";
 
@@ -62,30 +60,14 @@ export default async function Home({
 
       <StreakBanner data={data} />
 
+      <GoalsSection goals={data.goals} />
+
       <Calendar
         ym={data.month.ym}
         label={data.month.label}
         cells={data.month.cells}
         selectedDate={modalOpen ? data.selected.date : ""}
-        totalRules={data.rules.length}
       />
-
-      {data.goals.length > 0 && (
-        <>
-          <hr />
-          <section>
-            <h2 style={{ fontSize: 16, marginTop: 0 }}>Goals</h2>
-            <ul style={{ paddingLeft: 20, margin: 0 }}>
-              {data.goals.map((g) => (
-                <li key={g.id}>
-                  {g.title}
-                  {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
-      )}
 
       {modalOpen && (
         <ModalShell closeHref={closeHref}>
@@ -107,15 +89,19 @@ function StreakBanner({
 }) {
   const attempt = data.attempt;
   const isAdmin = data.is_admin;
+  const longest = data.history.longest_streak;
 
-  // Active attempt → big streak number.
+  const bannerBase: React.CSSProperties = {
+    border: "2px solid #000",
+    padding: "16px 20px",
+    marginBottom: 16,
+  };
+
   if (attempt && attempt.status === "active") {
     return (
       <section
         style={{
-          border: "2px solid #000",
-          padding: "16px 20px",
-          marginBottom: 16,
+          ...bannerBase,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -129,25 +115,19 @@ function StreakBanner({
           <div style={{ fontSize: 13, marginTop: 4 }}>
             day streak · of {attempt.target_days}
           </div>
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-            since {attempt.start_date}
-          </div>
+          <MetaLines
+            startedOn={attempt.start_date}
+            longest={longest}
+          />
         </div>
         {isAdmin && <AbandonAttemptButton />}
       </section>
     );
   }
 
-  // Completed → trophy.
   if (attempt && attempt.status === "completed") {
     return (
-      <section
-        style={{
-          border: "2px solid #000",
-          padding: "16px 20px",
-          marginBottom: 16,
-        }}
-      >
+      <section style={bannerBase}>
         <div style={{ fontSize: 32, fontWeight: 700, lineHeight: 1 }}>
           {attempt.target_days} / {attempt.target_days} ✓
         </div>
@@ -155,69 +135,85 @@ function StreakBanner({
           Completed
           {attempt.completed_at ? ` on ${attempt.completed_at.slice(0, 10)}` : ""}.
         </div>
+        <MetaLines startedOn={attempt.start_date} longest={longest} />
       </section>
     );
   }
 
-  // Failed → next attempt starts on first check.
   if (attempt && attempt.status === "failed") {
     const day = attempt.failed_on_date
       ? dayFromDates(attempt.start_date, attempt.failed_on_date)
       : "?";
     return (
-      <section
-        style={{
-          border: "2px solid #000",
-          padding: "16px 20px",
-          marginBottom: 16,
-        }}
-      >
+      <section style={bannerBase}>
         <div style={{ fontSize: 24, fontWeight: 700 }}>Failed on Day {day}</div>
         <div style={{ fontSize: 13, marginTop: 4 }}>
           {isAdmin
-            ? "Check today's first rule to start a new attempt."
+            ? "Mark today complete to start a new attempt."
             : "Waiting on the next attempt."}
         </div>
+        <MetaLines startedOn={attempt.start_date} longest={longest} />
       </section>
     );
   }
 
-  // No attempt yet.
   return (
-    <section
-      style={{
-        border: "2px solid #000",
-        padding: "16px 20px",
-        marginBottom: 16,
-      }}
-    >
+    <section style={bannerBase}>
       <div style={{ fontSize: 24, fontWeight: 700 }}>No attempt yet</div>
-      {data.history.last_outcome && (
-        <div style={{ fontSize: 13, marginTop: 4 }}>
-          <LastOutcomeLine outcome={data.history.last_outcome} />
-        </div>
-      )}
       <div style={{ fontSize: 13, marginTop: 4 }}>
         {isAdmin
-          ? "Check today's first rule to start."
+          ? "Mark today complete to start."
           : "Waiting on the next attempt."}
       </div>
+      <MetaLines startedOn={null} longest={longest} />
     </section>
   );
 }
 
-function LastOutcomeLine({
-  outcome,
+function MetaLines({
+  startedOn,
+  longest,
 }: {
-  outcome: NonNullable<
-    Awaited<ReturnType<typeof getHomeData>>["history"]["last_outcome"]
-  >;
+  startedOn: string | null;
+  longest: number;
 }) {
-  if (outcome.status === "completed") {
-    return <>Last attempt completed on {outcome.date}.</>;
-  }
   return (
-    <>Last attempt failed on Day {outcome.day} ({outcome.date}).</>
+    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
+      {startedOn && <div>Started {startedOn}</div>}
+      <div>Longest streak: {longest} day{longest === 1 ? "" : "s"}</div>
+    </div>
+  );
+}
+
+function GoalsSection({
+  goals,
+}: {
+  goals: Awaited<ReturnType<typeof getHomeData>>["goals"];
+}) {
+  return (
+    <section
+      style={{
+        border: "1px solid #000",
+        padding: "12px 16px",
+        marginBottom: 16,
+      }}
+    >
+      <h2 style={{ fontSize: 14, margin: "0 0 8px" }}>Goals</h2>
+      {goals.length === 0 ? (
+        <div style={{ fontSize: 13, opacity: 0.7 }}>
+          No goals set. Edit <code>src/lib/config.ts</code> to add them.
+        </div>
+      ) : (
+        <ul style={{ paddingLeft: 20, margin: 0 }}>
+          {goals.map((g) => (
+            <li key={g.id} style={{ fontSize: 14 }}>
+              {g.title}
+              {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -255,18 +251,25 @@ function SelectedDayPanel({
         </div>
       )}
 
+      <pre
+        style={{
+          fontFamily: "inherit",
+          whiteSpace: "pre-wrap",
+          margin: 0,
+          marginBottom: 16,
+          fontSize: 13,
+          opacity: 0.85,
+        }}
+      >
+        {data.description}
+      </pre>
+
       <div style={{ marginBottom: 16 }}>
-        {data.rules.map((r) => (
-          <ChecklistRow
-            key={r.id}
-            ruleId={r.id}
-            label={r.label}
-            date={s.date}
-            checked={s.checked.includes(r.id)}
-            disabled={!canEdit}
-            auto={r.auto === "diary"}
-          />
-        ))}
+        <DayCompleteToggle
+          date={s.date}
+          completed={s.completed}
+          disabled={!canEdit}
+        />
       </div>
 
       {isAdmin && (
