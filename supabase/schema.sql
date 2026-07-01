@@ -82,3 +82,147 @@ create view public.public_daily_logs
     from public.daily_logs;
 
 grant select on public.public_daily_logs to anon, authenticated;
+
+-- ===========================================================================
+-- Hard 75 / Challenges
+-- ===========================================================================
+
+-- User profile: minimal, holds the IANA timezone for now.
+-- (If the tracker spec later adds identity_prompt, do it with add-column-if-not-exists.)
+create table if not exists public.user_profiles (
+  user_id    text primary key,
+  timezone   text not null default 'UTC',
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists user_profiles_set_updated_at on public.user_profiles;
+create trigger user_profiles_set_updated_at
+  before update on public.user_profiles
+  for each row execute function public.set_updated_at();
+
+alter table public.user_profiles enable row level security;
+alter table public.user_profiles force row level security;
+
+drop policy if exists "owner_select" on public.user_profiles;
+create policy "owner_select" on public.user_profiles for select
+  using (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_insert" on public.user_profiles;
+create policy "owner_insert" on public.user_profiles for insert
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_update" on public.user_profiles;
+create policy "owner_update" on public.user_profiles for update
+  using      (auth.jwt() ->> 'sub' = user_id)
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+revoke all on public.user_profiles from anon, authenticated;
+grant select, insert, update on public.user_profiles to authenticated;
+
+-- A "challenge" is one attempt at a fixed-length daily-checklist streak.
+create table if not exists public.challenges (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        text not null,
+  title          text not null default 'Hard 75',
+  target_days    int  not null default 75 check (target_days > 0),
+  start_date     date not null,
+  status         text not null check (status in ('active','completed','failed')),
+  failed_on_date date,
+  completed_at   timestamptz,
+  timezone       text not null,
+  created_at     timestamptz not null default now()
+);
+
+-- At most one active attempt per user.
+create unique index if not exists challenges_one_active_per_user
+  on public.challenges (user_id) where status = 'active';
+
+create index if not exists challenges_user_created_idx
+  on public.challenges (user_id, created_at desc);
+
+alter table public.challenges enable row level security;
+alter table public.challenges force row level security;
+
+drop policy if exists "owner_select" on public.challenges;
+create policy "owner_select" on public.challenges for select
+  using (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_insert" on public.challenges;
+create policy "owner_insert" on public.challenges for insert
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_update" on public.challenges;
+create policy "owner_update" on public.challenges for update
+  using      (auth.jwt() ->> 'sub' = user_id)
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_delete" on public.challenges;
+create policy "owner_delete" on public.challenges for delete
+  using (auth.jwt() ->> 'sub' = user_id);
+
+revoke all on public.challenges from anon, authenticated;
+grant select, insert, update, delete on public.challenges to authenticated;
+
+-- Rules are inserted at startChallenge and never modified after.
+create table if not exists public.challenge_rules (
+  id           uuid primary key default gen_random_uuid(),
+  challenge_id uuid not null references public.challenges(id) on delete cascade,
+  user_id      text not null,
+  label        text not null,
+  position     int  not null,
+  created_at   timestamptz not null default now(),
+  unique (challenge_id, position)
+);
+
+create index if not exists challenge_rules_challenge_idx
+  on public.challenge_rules (challenge_id, position);
+
+alter table public.challenge_rules enable row level security;
+alter table public.challenge_rules force row level security;
+
+drop policy if exists "owner_select" on public.challenge_rules;
+create policy "owner_select" on public.challenge_rules for select
+  using (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_insert" on public.challenge_rules;
+create policy "owner_insert" on public.challenge_rules for insert
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_delete" on public.challenge_rules;
+create policy "owner_delete" on public.challenge_rules for delete
+  using (auth.jwt() ->> 'sub' = user_id);
+
+revoke all on public.challenge_rules from anon, authenticated;
+grant select, insert, delete on public.challenge_rules to authenticated;
+
+-- One row per rule-per-day when checked. Absence = unchecked.
+create table if not exists public.challenge_checks (
+  id           uuid primary key default gen_random_uuid(),
+  challenge_id uuid not null references public.challenges(id) on delete cascade,
+  rule_id      uuid not null references public.challenge_rules(id) on delete cascade,
+  user_id      text not null,
+  date         date not null,
+  created_at   timestamptz not null default now(),
+  unique (rule_id, date)
+);
+
+create index if not exists challenge_checks_challenge_date_idx
+  on public.challenge_checks (challenge_id, date);
+
+alter table public.challenge_checks enable row level security;
+alter table public.challenge_checks force row level security;
+
+drop policy if exists "owner_select" on public.challenge_checks;
+create policy "owner_select" on public.challenge_checks for select
+  using (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_insert" on public.challenge_checks;
+create policy "owner_insert" on public.challenge_checks for insert
+  with check (auth.jwt() ->> 'sub' = user_id);
+
+drop policy if exists "owner_delete" on public.challenge_checks;
+create policy "owner_delete" on public.challenge_checks for delete
+  using (auth.jwt() ->> 'sub' = user_id);
+
+revoke all on public.challenge_checks from anon, authenticated;
+grant select, insert, delete on public.challenge_checks to authenticated;
