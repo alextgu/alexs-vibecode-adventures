@@ -190,6 +190,7 @@ function GoalsSection({
 }: {
   goals: Awaited<ReturnType<typeof getHomeData>>["goals"];
 }) {
+  if (goals.length === 0) return null;
   return (
     <section
       style={{
@@ -199,20 +200,14 @@ function GoalsSection({
       }}
     >
       <h2 style={{ fontSize: 14, margin: "0 0 8px" }}>Goals</h2>
-      {goals.length === 0 ? (
-        <div style={{ fontSize: 13, opacity: 0.7 }}>
-          No goals set. Edit <code>src/lib/config.ts</code> to add them.
-        </div>
-      ) : (
-        <ul style={{ paddingLeft: 20, margin: 0 }}>
-          {goals.map((g) => (
-            <li key={g.id} style={{ fontSize: 14 }}>
-              {g.title}
-              {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul style={{ paddingLeft: 20, margin: 0 }}>
+        {goals.map((g) => (
+          <li key={g.id} style={{ fontSize: 14 }}>
+            {g.title}
+            {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
