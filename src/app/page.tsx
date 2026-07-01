@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getHomeData, getDiary } from "@/lib/challenges";
 import { listGoals } from "@/lib/goals";
+import { listDailyGoals } from "@/lib/daily-goals";
 import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
@@ -8,6 +9,7 @@ import { LockButton } from "@/components/LockButton";
 import { AbandonAttemptButton } from "@/components/AttemptControls";
 import { ModalShell } from "@/components/ModalShell";
 import { GoalsSection } from "@/components/GoalsSection";
+import { DailyGoalsSection } from "@/components/DailyGoalsSection";
 
 export default async function Home({
   searchParams,
@@ -15,8 +17,11 @@ export default async function Home({
   searchParams: Promise<{ ym?: string; d?: string }>;
 }) {
   const sp = await searchParams;
-  const data = await getHomeData({ ym: sp.ym, d: sp.d });
-  const goals = await listGoals();
+  const [data, goals, dailyGoals] = await Promise.all([
+    getHomeData({ ym: sp.ym, d: sp.d }),
+    listGoals(),
+    listDailyGoals(),
+  ]);
 
   const isAdmin = data.is_admin;
   const modalOpen = typeof sp.d === "string" && sp.d.length > 0;
@@ -61,6 +66,8 @@ export default async function Home({
       )}
 
       <StreakBanner data={data} />
+
+      <DailyGoalsSection goals={dailyGoals} isAdmin={isAdmin} />
 
       <GoalsSection goals={goals} isAdmin={isAdmin} />
 

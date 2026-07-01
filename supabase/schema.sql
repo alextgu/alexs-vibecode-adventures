@@ -198,3 +198,52 @@ create policy "public_select" on public.goals for select using (true);
 
 revoke all on public.goals from anon, authenticated;
 grant select on public.goals to anon, authenticated;
+
+-- Recurring daily goals. Each row = one recurring habit you want to track.
+-- Independent of the 75-day challenge — toggling these does not affect
+-- the streak or the day score.
+drop table if exists public.daily_goal_completions;
+drop table if exists public.daily_goals;
+create table public.daily_goals (
+  id         uuid primary key default gen_random_uuid(),
+  title      text not null,
+  note       text,
+  position   int  not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists daily_goals_set_updated_at on public.daily_goals;
+create trigger daily_goals_set_updated_at
+  before update on public.daily_goals
+  for each row execute function public.set_updated_at();
+
+create index daily_goals_position_idx on public.daily_goals (position, created_at);
+
+alter table public.daily_goals enable row level security;
+
+drop policy if exists "public_select" on public.daily_goals;
+create policy "public_select" on public.daily_goals for select using (true);
+
+revoke all on public.daily_goals from anon, authenticated;
+grant select on public.daily_goals to anon, authenticated;
+
+-- One row per (daily_goal, date) when done that day.
+create table public.daily_goal_completions (
+  id            uuid primary key default gen_random_uuid(),
+  daily_goal_id uuid not null references public.daily_goals(id) on delete cascade,
+  date          date not null,
+  created_at    timestamptz not null default now(),
+  unique (daily_goal_id, date)
+);
+
+create index daily_goal_completions_date_idx
+  on public.daily_goal_completions (date, daily_goal_id);
+
+alter table public.daily_goal_completions enable row level security;
+
+drop policy if exists "public_select" on public.daily_goal_completions;
+create policy "public_select" on public.daily_goal_completions for select using (true);
+
+revoke all on public.daily_goal_completions from anon, authenticated;
+grant select on public.daily_goal_completions to anon, authenticated;
