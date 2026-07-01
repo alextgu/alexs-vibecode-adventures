@@ -84,21 +84,24 @@ create view public.public_daily_logs
 grant select on public.public_daily_logs to anon, authenticated;
 
 -- ===========================================================================
--- Hard 75 / Challenges  (single-admin, public-read)
+-- Hard 75 / Challenges  (single-tenant, public-read, password-gated writes)
 -- ===========================================================================
--- This is a personal habit tracker with one admin.
--- Anyone (anon) can SELECT — the app renders as read-only for the public.
--- Only the admin's Clerk session can INSERT/UPDATE/DELETE, gated in server actions
--- by email; RLS is defense-in-depth (user_id must match the caller's Clerk sub).
+-- Personal habit tracker. Anyone (anon) can SELECT — read-only calendar view.
+-- All writes go through the app server using a Supabase service-role client,
+-- which bypasses RLS. Access to that path is gated by ADMIN_PASSWORD (see
+-- src/lib/supabase.ts). anon has SELECT only, so a leaked anon key still
+-- can't write.
 --
--- Clean up prior spec tables that are no longer used.
+-- Clean up prior tables that are no longer used.
 drop table if exists public.challenge_rules;
 drop table if exists public.user_profiles;
+-- Drop old writable variants if they exist so this migration is re-runnable.
+drop table if exists public.challenge_checks;
+drop table if exists public.diary_entries;
+drop table if exists public.challenges;
 
--- A "challenge" is one attempt at a fixed-length daily-checklist streak.
-create table if not exists public.challenges (
+create table public.challenges (
   id             uuid primary key default gen_random_uuid(),
-  user_id        text not null,
   target_days    int  not null default 75 check (target_days > 0),
   start_date     date not null,
   status         text not null check (status in ('active','completed','failed')),
@@ -108,80 +111,47 @@ create table if not exists public.challenges (
   created_at     timestamptz not null default now()
 );
 
--- At most one active attempt (across the whole app, one admin = one user_id).
-create unique index if not exists challenges_one_active
-  on public.challenges (user_id) where status = 'active';
+-- At most one active attempt globally (single tenant).
+create unique index challenges_one_active
+  on public.challenges ((true)) where status = 'active';
 
-create index if not exists challenges_created_idx
+create index challenges_created_idx
   on public.challenges (created_at desc);
 
 alter table public.challenges enable row level security;
-alter table public.challenges force row level security;
 
-drop policy if exists "owner_select" on public.challenges;
 drop policy if exists "public_select" on public.challenges;
 create policy "public_select" on public.challenges for select using (true);
 
-drop policy if exists "owner_insert" on public.challenges;
-create policy "owner_insert" on public.challenges for insert
-  with check (auth.jwt() ->> 'sub' = user_id);
-
-drop policy if exists "owner_update" on public.challenges;
-create policy "owner_update" on public.challenges for update
-  using      (auth.jwt() ->> 'sub' = user_id)
-  with check (auth.jwt() ->> 'sub' = user_id);
-
-drop policy if exists "owner_delete" on public.challenges;
-create policy "owner_delete" on public.challenges for delete
-  using (auth.jwt() ->> 'sub' = user_id);
-
 revoke all on public.challenges from anon, authenticated;
 grant select on public.challenges to anon, authenticated;
-grant insert, update, delete on public.challenges to authenticated;
 
--- One row per rule-per-day when checked. Absence = unchecked.
--- rule_id is a text key that must match a RULES entry in src/lib/rules.ts.
-create table if not exists public.challenge_checks (
+create table public.challenge_checks (
   id           uuid primary key default gen_random_uuid(),
   challenge_id uuid not null references public.challenges(id) on delete cascade,
   rule_id      text not null,
-  user_id      text not null,
   date         date not null,
   created_at   timestamptz not null default now(),
   unique (challenge_id, rule_id, date)
 );
 
-create index if not exists challenge_checks_challenge_date_idx
+create index challenge_checks_challenge_date_idx
   on public.challenge_checks (challenge_id, date);
 
 alter table public.challenge_checks enable row level security;
-alter table public.challenge_checks force row level security;
 
-drop policy if exists "owner_select" on public.challenge_checks;
 drop policy if exists "public_select" on public.challenge_checks;
 create policy "public_select" on public.challenge_checks for select using (true);
 
-drop policy if exists "owner_insert" on public.challenge_checks;
-create policy "owner_insert" on public.challenge_checks for insert
-  with check (auth.jwt() ->> 'sub' = user_id);
-
-drop policy if exists "owner_delete" on public.challenge_checks;
-create policy "owner_delete" on public.challenge_checks for delete
-  using (auth.jwt() ->> 'sub' = user_id);
-
 revoke all on public.challenge_checks from anon, authenticated;
 grant select on public.challenge_checks to anon, authenticated;
-grant insert, delete on public.challenge_checks to authenticated;
 
 -- One diary entry per date. Independent of attempts (survives restarts).
-create table if not exists public.diary_entries (
-  id         uuid primary key default gen_random_uuid(),
-  user_id    text not null,
-  date       date not null,
+create table public.diary_entries (
+  date       date primary key,
   content    text not null default '',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, date)
+  updated_at timestamptz not null default now()
 );
 
 drop trigger if exists diary_entries_set_updated_at on public.diary_entries;
@@ -189,27 +159,12 @@ create trigger diary_entries_set_updated_at
   before update on public.diary_entries
   for each row execute function public.set_updated_at();
 
-create index if not exists diary_entries_date_idx on public.diary_entries (date);
+create index diary_entries_date_idx on public.diary_entries (date);
 
 alter table public.diary_entries enable row level security;
-alter table public.diary_entries force row level security;
 
 drop policy if exists "public_select" on public.diary_entries;
 create policy "public_select" on public.diary_entries for select using (true);
 
-drop policy if exists "owner_insert" on public.diary_entries;
-create policy "owner_insert" on public.diary_entries for insert
-  with check (auth.jwt() ->> 'sub' = user_id);
-
-drop policy if exists "owner_update" on public.diary_entries;
-create policy "owner_update" on public.diary_entries for update
-  using      (auth.jwt() ->> 'sub' = user_id)
-  with check (auth.jwt() ->> 'sub' = user_id);
-
-drop policy if exists "owner_delete" on public.diary_entries;
-create policy "owner_delete" on public.diary_entries for delete
-  using (auth.jwt() ->> 'sub' = user_id);
-
 revoke all on public.diary_entries from anon, authenticated;
 grant select on public.diary_entries to anon, authenticated;
-grant insert, update, delete on public.diary_entries to authenticated;

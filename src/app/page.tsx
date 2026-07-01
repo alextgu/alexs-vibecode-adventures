@@ -1,8 +1,9 @@
-import { SignInButton, UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 import { getHomeData, getDiary } from "@/lib/challenges";
 import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
+import { LockButton } from "@/components/LockButton";
 import {
   StartAttemptButton,
   AbandonAttemptButton,
@@ -17,7 +18,7 @@ export default async function Home({
   const data = await getHomeData({ ym: sp.ym, d: sp.d });
   const selectedDiary = await getDiary(data.selected.date);
 
-  const isAdmin = data.mode === "admin";
+  const isAdmin = data.is_admin;
   const selectedIsToday = data.selected.is_today;
   const canEdit = isAdmin && selectedIsToday;
 
@@ -34,16 +35,15 @@ export default async function Home({
       >
         <h1 style={{ margin: 0, fontSize: 20 }}>Hard 75 — Alex Version</h1>
         <nav style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          {data.mode === "signed-out" && (
-            <SignInButton mode="modal">
-              <button type="button">Sign in</button>
-            </SignInButton>
+          {isAdmin ? (
+            <LockButton />
+          ) : (
+            <Link href="/unlock">Unlock</Link>
           )}
-          {data.mode !== "signed-out" && <UserButton />}
         </nav>
       </header>
 
-      {data.mode === "not-admin" && (
+      {!isAdmin && (
         <div
           style={{
             border: "1px solid #000",
@@ -52,7 +52,7 @@ export default async function Home({
             fontSize: 13,
           }}
         >
-          Not admin. View-only.
+          View-only. <Link href="/unlock">Unlock</Link> to edit today.
         </div>
       )}
 
@@ -111,7 +111,7 @@ function StatusLine({
   data: Awaited<ReturnType<typeof getHomeData>>;
 }) {
   const attempt = data.attempt;
-  const isAdmin = data.mode === "admin";
+  const isAdmin = data.is_admin;
 
   if (!attempt) {
     return (

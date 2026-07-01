@@ -1,6 +1,12 @@
 "use server";
 
-import { getAdminSupabase, getPublicSupabase } from "@/lib/supabase";
+import { cookies } from "next/headers";
+import {
+  isAdminRequest,
+  getServiceSupabase,
+  getPublicSupabase,
+  ADMIN_COOKIE,
+} from "@/lib/supabase";
 import {
   RULES,
   TARGET_DAYS,
@@ -14,7 +20,6 @@ import { todayInTz, addDays, daysBetween } from "@/lib/dates";
 
 export type ChallengeRow = {
   id: string;
-  user_id: string;
   target_days: number;
   start_date: string;
   status: "active" | "completed" | "failed";
@@ -25,26 +30,26 @@ export type ChallengeRow = {
 
 export type DayData = {
   date: string;
-  day_num: number | null; // null if outside the attempt window
+  day_num: number | null;
   in_attempt: boolean;
   is_today: boolean;
   is_past: boolean;
   is_future: boolean;
-  checked: string[]; // rule ids
+  checked: string[];
   all_checked: boolean;
-  failed: boolean; // this specific day is the fail date
+  failed: boolean;
   has_diary: boolean;
 };
 
 export type MonthCell = {
-  date: string; // YYYY-MM-DD
+  date: string;
   day_of_month: number;
-  in_month: boolean; // false = leading/trailing pad from adjacent month
+  in_month: boolean;
   day: DayData;
 };
 
 export type HomeData = {
-  mode: "admin" | "not-admin" | "signed-out";
+  is_admin: boolean;
   today: string;
   timezone: string;
   target_days: number;
@@ -61,15 +66,15 @@ export type HomeData = {
       | { status: "failed"; date: string; day: number };
   };
   month: {
-    ym: string; // YYYY-MM
-    label: string; // "March 2026"
-    cells: MonthCell[]; // always length 42 (6 weeks) — sunday start
+    ym: string;
+    label: string;
+    cells: MonthCell[];
   };
   selected: DayData;
 };
 
 // ---------------------------------------------------------------------------
-// Reads (public — anyone)
+// Reads (public — anon)
 // ---------------------------------------------------------------------------
 
 async function loadActive(): Promise<ChallengeRow | null> {
@@ -77,7 +82,7 @@ async function loadActive(): Promise<ChallengeRow | null> {
   const { data } = await supabase
     .from("challenges")
     .select(
-      "id, user_id, target_days, start_date, status, failed_on_date, completed_at, timezone",
+      "id, target_days, start_date, status, failed_on_date, completed_at, timezone",
     )
     .eq("status", "active")
     .maybeSingle();
@@ -161,11 +166,6 @@ async function loadHistorySummary(): Promise<HomeData["history"]> {
   return { total: rows.length, completed, failed, last_outcome: last };
 }
 
-/**
- * Runs the lazy fail / complete evaluation for the active attempt.
- * This only writes to the DB if the caller is admin. For public reads we
- * still compute the "effective" status in memory so the calendar looks right.
- */
 async function evaluateAttempt(
   attempt: ChallengeRow,
   checksByDate: Map<string, Set<string>>,
@@ -174,9 +174,7 @@ async function evaluateAttempt(
   canWrite: boolean,
 ): Promise<ChallengeRow> {
   const startDate = attempt.start_date;
-  const lastRequired = addDays(startDate, attempt.target_days - 1);
 
-  // Find first failed day in [start_date, min(today, lastRequired) - 1]
   const walkEnd = Math.min(
     daysBetween(startDate, today) - 1,
     attempt.target_days - 2,
@@ -192,22 +190,15 @@ async function evaluateAttempt(
   }
 
   if (failedOn) {
-    const updated: ChallengeRow = {
-      ...attempt,
-      status: "failed",
-      failed_on_date: failedOn,
-    };
     if (canWrite) {
-      const admin = await getAdminSupabase();
-      if (admin.ok) {
-        await admin.client
-          .from("challenges")
-          .update({ status: "failed", failed_on_date: failedOn })
-          .eq("id", attempt.id)
-          .eq("status", "active");
-      }
+      const svc = getServiceSupabase();
+      await svc
+        .from("challenges")
+        .update({ status: "failed", failed_on_date: failedOn })
+        .eq("id", attempt.id)
+        .eq("status", "active");
     }
-    return updated;
+    return { ...attempt, status: "failed", failed_on_date: failedOn };
   }
 
   const todayCount = checksByDate.get(today)?.size ?? 0;
@@ -218,27 +209,16 @@ async function evaluateAttempt(
 
   if (todayIsPast || todayIsLastAndDone) {
     const nowIso = new Date().toISOString();
-    const updated: ChallengeRow = {
-      ...attempt,
-      status: "completed",
-      completed_at: nowIso,
-    };
     if (canWrite) {
-      const admin = await getAdminSupabase();
-      if (admin.ok) {
-        await admin.client
-          .from("challenges")
-          .update({ status: "completed", completed_at: nowIso })
-          .eq("id", attempt.id)
-          .eq("status", "active");
-      }
+      const svc = getServiceSupabase();
+      await svc
+        .from("challenges")
+        .update({ status: "completed", completed_at: nowIso })
+        .eq("id", attempt.id)
+        .eq("status", "active");
     }
-    return updated;
+    return { ...attempt, status: "completed", completed_at: nowIso };
   }
-
-  // Discard lastRequired since it isn't returned in the result — this line
-  // is here so the linter doesn't complain about an unused var above.
-  void lastRequired;
 
   return attempt;
 }
@@ -290,13 +270,12 @@ function buildMonthCells(
 ): { cells: MonthCell[]; label: string } {
   const [yStr, mStr] = ym.split("-");
   const year = Number(yStr);
-  const month = Number(mStr); // 1..12
+  const month = Number(mStr);
 
   const firstOfMonth = `${yStr}-${mStr}-01`;
   const firstDate = new Date(Date.UTC(year, month - 1, 1));
-  const dow = firstDate.getUTCDay(); // 0 = Sun
+  const dow = firstDate.getUTCDay();
 
-  // Grid start: back up to the Sunday on or before the 1st.
   const gridStart = addDays(firstOfMonth, -dow);
   const cells: MonthCell[] = [];
   for (let i = 0; i < 42; i++) {
@@ -318,16 +297,11 @@ function buildMonthCells(
   return { cells, label };
 }
 
-/**
- * Everything the home page needs: mode, attempt, month grid, selected day.
- * `ym` = "YYYY-MM" (defaults to today's month). `d` = "YYYY-MM-DD" (defaults today).
- */
 export async function getHomeData(input?: {
   ym?: string;
   d?: string;
 }): Promise<HomeData> {
-  const { getSessionMode } = await import("@/lib/supabase");
-  const mode = await getSessionMode();
+  const isAdmin = await isAdminRequest();
   const today = todayInTz(TIMEZONE);
 
   const rawAttempt = await loadActive();
@@ -343,7 +317,7 @@ export async function getHomeData(input?: {
       checksByDate,
       RULES.length,
       today,
-      mode === "admin",
+      isAdmin,
     );
   }
 
@@ -373,7 +347,7 @@ export async function getHomeData(input?: {
   );
 
   return {
-    mode,
+    is_admin: isAdmin,
     today,
     timezone: TIMEZONE,
     target_days: TARGET_DAYS,
@@ -393,21 +367,27 @@ export async function getHomeData(input?: {
 }
 
 // ---------------------------------------------------------------------------
-// Writes (admin-only)
+// Writes (admin cookie required)
 // ---------------------------------------------------------------------------
 
 export type Result = { ok: true } | { ok: false; error: string };
 
 const RULE_IDS = new Set(RULES.map((r) => r.id));
 
+async function requireAdmin(): Promise<Result | null> {
+  if (!(await isAdminRequest())) {
+    return { ok: false, error: "Locked. Enter the password to edit." };
+  }
+  return null;
+}
+
 export async function startAttempt(): Promise<Result> {
-  const admin = await getAdminSupabase();
-  if (!admin.ok) return { ok: false, error: reasonMsg(admin.reason) };
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
 
   const startDate = todayInTz(TIMEZONE);
-
-  const { error } = await admin.client.from("challenges").insert({
-    user_id: admin.userId,
+  const { error } = await svc.from("challenges").insert({
     target_days: TARGET_DAYS,
     start_date: startDate,
     status: "active",
@@ -416,7 +396,7 @@ export async function startAttempt(): Promise<Result> {
 
   if (error) {
     if (error.code === "23505") {
-      return { ok: false, error: "You already have an active challenge." };
+      return { ok: false, error: "There's already an active attempt." };
     }
     return { ok: false, error: error.message };
   }
@@ -424,19 +404,20 @@ export async function startAttempt(): Promise<Result> {
 }
 
 export async function abandonAttempt(): Promise<Result> {
-  const admin = await getAdminSupabase();
-  if (!admin.ok) return { ok: false, error: reasonMsg(admin.reason) };
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
 
-  const { data: row } = await admin.client
+  const { data: row } = await svc
     .from("challenges")
     .select("id, timezone, status")
     .eq("status", "active")
     .maybeSingle();
 
-  if (!row) return { ok: false, error: "No active challenge." };
+  if (!row) return { ok: false, error: "No active attempt." };
 
   const today = todayInTz((row.timezone as string) || TIMEZONE);
-  const { error } = await admin.client
+  const { error } = await svc
     .from("challenges")
     .update({ status: "failed", failed_on_date: today })
     .eq("id", row.id)
@@ -446,20 +427,18 @@ export async function abandonAttempt(): Promise<Result> {
   return { ok: true };
 }
 
-async function assertTodayForActive(
-  admin: Extract<Awaited<ReturnType<typeof getAdminSupabase>>, { ok: true }>,
+async function getActiveForToday(
   date: string,
 ): Promise<{ challengeId: string } | { error: string }> {
-  const { data } = await admin.client
+  const svc = getServiceSupabase();
+  const { data } = await svc
     .from("challenges")
     .select("id, timezone, status")
     .eq("status", "active")
     .maybeSingle();
-  if (!data) return { error: "No active challenge." };
+  if (!data) return { error: "No active attempt." };
   const tz = (data.timezone as string) || TIMEZONE;
-  if (date !== todayInTz(tz)) {
-    return { error: "You can only edit today." };
-  }
+  if (date !== todayInTz(tz)) return { error: "You can only edit today." };
   return { challengeId: data.id as string };
 }
 
@@ -471,20 +450,20 @@ export async function checkRule(
   if (ruleId === DIARY_RULE_ID) {
     return {
       ok: false,
-      error: "The diary rule is checked automatically when you write in it.",
+      error: "The diary rule checks automatically once you write in it.",
     };
   }
 
-  const admin = await getAdminSupabase();
-  if (!admin.ok) return { ok: false, error: reasonMsg(admin.reason) };
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
 
-  const check = await assertTodayForActive(admin, date);
+  const check = await getActiveForToday(date);
   if ("error" in check) return { ok: false, error: check.error };
 
-  const { error } = await admin.client.from("challenge_checks").insert({
+  const { error } = await svc.from("challenge_checks").insert({
     challenge_id: check.challengeId,
     rule_id: ruleId,
-    user_id: admin.userId,
     date,
   });
 
@@ -500,19 +479,17 @@ export async function uncheckRule(
 ): Promise<Result> {
   if (!RULE_IDS.has(ruleId)) return { ok: false, error: "Unknown rule." };
   if (ruleId === DIARY_RULE_ID) {
-    return {
-      ok: false,
-      error: "The diary rule is checked automatically when you write in it.",
-    };
+    return { ok: false, error: "Clear the diary text to uncheck." };
   }
 
-  const admin = await getAdminSupabase();
-  if (!admin.ok) return { ok: false, error: reasonMsg(admin.reason) };
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
 
-  const check = await assertTodayForActive(admin, date);
+  const check = await getActiveForToday(date);
   if ("error" in check) return { ok: false, error: check.error };
 
-  const { error } = await admin.client
+  const { error } = await svc
     .from("challenge_checks")
     .delete()
     .eq("challenge_id", check.challengeId)
@@ -537,8 +514,9 @@ export async function saveDiary(
   date: string,
   content: string,
 ): Promise<Result> {
-  const admin = await getAdminSupabase();
-  if (!admin.ok) return { ok: false, error: reasonMsg(admin.reason) };
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
 
   if (date !== todayInTz(TIMEZONE)) {
     return { ok: false, error: "You can only write today's diary." };
@@ -546,22 +524,17 @@ export async function saveDiary(
 
   const clean = typeof content === "string" ? content.slice(0, 20000) : "";
 
-  const { error } = await admin.client.from("diary_entries").upsert(
-    {
-      user_id: admin.userId,
-      date,
-      content: clean,
-    },
-    { onConflict: "user_id,date" },
-  );
+  const { error } = await svc
+    .from("diary_entries")
+    .upsert({ date, content: clean }, { onConflict: "date" });
 
   if (error) return { ok: false, error: error.message };
 
   // Auto-sync the diary rule check with content presence, if there's an
   // active attempt and today falls inside it.
-  const { data: active } = await admin.client
+  const { data: active } = await svc
     .from("challenges")
-    .select("id, start_date, target_days, timezone")
+    .select("id, start_date, target_days")
     .eq("status", "active")
     .maybeSingle();
 
@@ -572,17 +545,16 @@ export async function saveDiary(
         (active.target_days as number);
     if (inAttempt) {
       if (clean.trim().length > 0) {
-        await admin.client
+        await svc
           .from("challenge_checks")
           .insert({
             challenge_id: active.id,
             rule_id: DIARY_RULE_ID,
-            user_id: admin.userId,
             date,
           })
           .then(() => undefined, () => undefined);
       } else {
-        await admin.client
+        await svc
           .from("challenge_checks")
           .delete()
           .eq("challenge_id", active.id)
@@ -595,7 +567,42 @@ export async function saveDiary(
   return { ok: true };
 }
 
-function reasonMsg(reason: "signed-out" | "not-admin"): string {
-  if (reason === "signed-out") return "Sign in required.";
-  return "Not admin.";
+// ---------------------------------------------------------------------------
+// Unlock / lock
+// ---------------------------------------------------------------------------
+
+export async function unlock(password: string): Promise<Result> {
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) {
+    return { ok: false, error: "ADMIN_PASSWORD is not set on the server." };
+  }
+  if (typeof password !== "string" || password.length === 0) {
+    return { ok: false, error: "Enter a password." };
+  }
+  // Constant-time compare
+  if (password.length !== expected.length) {
+    return { ok: false, error: "Wrong password." };
+  }
+  let diff = 0;
+  for (let i = 0; i < password.length; i++) {
+    diff |= password.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  if (diff !== 0) return { ok: false, error: "Wrong password." };
+
+  const jar = await cookies();
+  jar.set(ADMIN_COOKIE, expected, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    // 30 days
+    maxAge: 60 * 60 * 24 * 30,
+  });
+  return { ok: true };
+}
+
+export async function lock(): Promise<Result> {
+  const jar = await cookies();
+  jar.delete(ADMIN_COOKIE);
+  return { ok: true };
 }
