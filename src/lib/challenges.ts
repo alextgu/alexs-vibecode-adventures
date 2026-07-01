@@ -12,11 +12,11 @@ import {
   clearUnlockAttempts,
 } from "@/lib/supabase";
 import {
-  DESCRIPTION,
+  RULES,
   TARGET_DAYS,
   TIMEZONE,
-  GOALS,
-  type Goal,
+  DIARY_RULE_ID,
+  type Rule,
 } from "@/lib/config";
 import { todayInTz, addDays, daysBetween } from "@/lib/dates";
 
@@ -37,7 +37,8 @@ export type DayData = {
   is_today: boolean;
   is_past: boolean;
   is_future: boolean;
-  completed: boolean;
+  checked: string[]; // rule ids checked for this day
+  all_checked: boolean;
   failed: boolean;
   has_diary: boolean;
 };
@@ -52,9 +53,8 @@ export type MonthCell = {
 export type HomeData = {
   is_admin: boolean;
   today: string;
-  description: string;
   target_days: number;
-  goals: Goal[];
+  rules: Rule[];
   attempt: (ChallengeRow & { current_day: number | null }) | null;
   history: {
     total_attempts: number;
@@ -90,17 +90,25 @@ async function loadActive(): Promise<ChallengeRow | null> {
   return (data as ChallengeRow | null) ?? null;
 }
 
-/** Set of dates completed for the given challenge. */
-async function loadCompletedDates(challengeId: string): Promise<Set<string>> {
+async function loadChecks(
+  challengeId: string,
+): Promise<Map<string, Set<string>>> {
   const supabase = getPublicSupabase();
   const { data } = await supabase
     .from("challenge_checks")
-    .select("date")
+    .select("rule_id, date")
     .eq("challenge_id", challengeId);
 
-  const set = new Set<string>();
-  for (const c of (data ?? []) as { date: string }[]) set.add(c.date);
-  return set;
+  const map = new Map<string, Set<string>>();
+  for (const c of (data ?? []) as { rule_id: string; date: string }[]) {
+    let s = map.get(c.date);
+    if (!s) {
+      s = new Set();
+      map.set(c.date, s);
+    }
+    s.add(c.rule_id);
+  }
+  return map;
 }
 
 async function loadDiaryDates(): Promise<Set<string>> {
@@ -115,11 +123,6 @@ async function loadDiaryDates(): Promise<Set<string>> {
   return set;
 }
 
-/**
- * Load a compact history summary AND compute the all-time longest streak.
- * A streak here = number of consecutive completed days from an attempt's
- * start_date. Fails break the streak; a completed attempt = target_days.
- */
 async function loadHistorySummary(
   today: string,
 ): Promise<HomeData["history"]> {
@@ -144,6 +147,7 @@ async function loadHistorySummary(
   let failed = 0;
   let last: HomeData["history"]["last_outcome"] = null;
   let longest = 0;
+  const ruleCount = RULES.length;
 
   for (const r of rows) {
     if (r.status === "completed") {
@@ -161,7 +165,6 @@ async function loadHistorySummary(
       const day = r.failed_on_date
         ? daysBetween(r.start_date, r.failed_on_date)
         : 0;
-      // Days completed before the fail = failed_on_date index (0-based)
       longest = Math.max(longest, day);
       if (!last && r.failed_on_date) {
         last = {
@@ -171,13 +174,13 @@ async function loadHistorySummary(
         };
       }
     } else if (r.status === "active") {
-      // How far along = consecutive completed days from start.
-      const completed_dates = await loadCompletedDates(r.id);
+      const checks = await loadChecks(r.id);
       let streak = 0;
       for (let i = 0; ; i++) {
         const d = addDays(r.start_date, i);
         if (d > today) break;
-        if (completed_dates.has(d)) streak++;
+        const count = checks.get(d)?.size ?? 0;
+        if (count >= ruleCount) streak++;
         else break;
       }
       longest = Math.max(longest, streak);
@@ -195,13 +198,13 @@ async function loadHistorySummary(
 
 async function evaluateAttempt(
   attempt: ChallengeRow,
-  completedDates: Set<string>,
+  checksByDate: Map<string, Set<string>>,
+  ruleCount: number,
   today: string,
   canWrite: boolean,
 ): Promise<ChallengeRow> {
   const startDate = attempt.start_date;
 
-  // Fail = first past day (before today) that isn't complete.
   const walkEnd = Math.min(
     daysBetween(startDate, today) - 1,
     attempt.target_days - 2,
@@ -209,7 +212,8 @@ async function evaluateAttempt(
   let failedOn: string | null = null;
   for (let i = 0; i <= walkEnd; i++) {
     const d = addDays(startDate, i);
-    if (!completedDates.has(d)) {
+    const count = checksByDate.get(d)?.size ?? 0;
+    if (count < ruleCount) {
       failedOn = d;
       break;
     }
@@ -227,10 +231,11 @@ async function evaluateAttempt(
     return { ...attempt, status: "failed", failed_on_date: failedOn };
   }
 
-  const todayComplete = completedDates.has(today);
+  const todayCount = checksByDate.get(today)?.size ?? 0;
   const todayIsPast = daysBetween(startDate, today) >= attempt.target_days;
   const todayIsLastAndDone =
-    daysBetween(startDate, today) === attempt.target_days - 1 && todayComplete;
+    daysBetween(startDate, today) === attempt.target_days - 1 &&
+    todayCount === ruleCount;
 
   if (todayIsPast || todayIsLastAndDone) {
     const nowIso = new Date().toISOString();
@@ -251,7 +256,7 @@ async function evaluateAttempt(
 function buildDayData(
   date: string,
   attempt: ChallengeRow | null,
-  completedDates: Set<string>,
+  checksByDate: Map<string, Set<string>>,
   diaryDates: Set<string>,
   today: string,
 ): DayData {
@@ -264,7 +269,9 @@ function buildDayData(
     ? daysBetween(attempt!.start_date, date) + 1
     : null;
 
-  const completed = completedDates.has(date);
+  const checked = Array.from(checksByDate.get(date) ?? []);
+  const allChecked = inAttempt && checked.length === RULES.length;
+
   const failed =
     !!attempt &&
     attempt.status === "failed" &&
@@ -277,7 +284,8 @@ function buildDayData(
     is_today: date === today,
     is_past: date < today,
     is_future: date > today,
-    completed,
+    checked,
+    all_checked: allChecked,
     failed,
     has_diary: diaryDates.has(date),
   };
@@ -286,7 +294,7 @@ function buildDayData(
 function buildMonthCells(
   ym: string,
   attempt: ChallengeRow | null,
-  completedDates: Set<string>,
+  checksByDate: Map<string, Set<string>>,
   diaryDates: Set<string>,
   today: string,
 ): { cells: MonthCell[]; label: string } {
@@ -308,7 +316,7 @@ function buildMonthCells(
       date,
       day_of_month: cd,
       in_month: inMonth,
-      day: buildDayData(date, attempt, completedDates, diaryDates, today),
+      day: buildDayData(date, attempt, checksByDate, diaryDates, today),
     });
   }
 
@@ -327,14 +335,20 @@ export async function getHomeData(input?: {
   const today = todayInTz(TIMEZONE);
 
   const rawAttempt = await loadActive();
-  const completedDates = rawAttempt
-    ? await loadCompletedDates(rawAttempt.id)
-    : new Set<string>();
+  const checksByDate = rawAttempt
+    ? await loadChecks(rawAttempt.id)
+    : new Map<string, Set<string>>();
   const diaryDates = isAdmin ? await loadDiaryDates() : new Set<string>();
 
   let attempt = rawAttempt;
   if (attempt) {
-    attempt = await evaluateAttempt(attempt, completedDates, today, isAdmin);
+    attempt = await evaluateAttempt(
+      attempt,
+      checksByDate,
+      RULES.length,
+      today,
+      isAdmin,
+    );
   }
 
   const currentDay =
@@ -348,7 +362,7 @@ export async function getHomeData(input?: {
   const { cells, label } = buildMonthCells(
     ym,
     attempt,
-    completedDates,
+    checksByDate,
     diaryDates,
     today,
   );
@@ -357,7 +371,7 @@ export async function getHomeData(input?: {
   const selected = buildDayData(
     selectedDate,
     attempt,
-    completedDates,
+    checksByDate,
     diaryDates,
     today,
   );
@@ -365,9 +379,8 @@ export async function getHomeData(input?: {
   return {
     is_admin: isAdmin,
     today,
-    description: DESCRIPTION,
     target_days: TARGET_DAYS,
-    goals: GOALS,
+    rules: RULES,
     attempt: attempt
       ? {
           ...attempt,
@@ -387,6 +400,8 @@ export async function getHomeData(input?: {
 
 export type Result = { ok: true } | { ok: false; error: string };
 
+const RULE_IDS = new Set(RULES.map((r) => r.id));
+
 async function requireAdmin(): Promise<Result | null> {
   if (!(await isAdminRequest())) {
     return { ok: false, error: "Locked. Enter the password to edit." };
@@ -394,10 +409,6 @@ async function requireAdmin(): Promise<Result | null> {
   return null;
 }
 
-/**
- * Returns the active attempt id, auto-creating one starting today if none
- * exists. Only editable when `date` is today.
- */
 async function getOrCreateActiveForToday(
   date: string,
 ): Promise<{ challengeId: string } | { error: string }> {
@@ -434,17 +445,30 @@ async function getOrCreateActiveForToday(
   return { challengeId: created.id as string };
 }
 
-export async function markDayComplete(date: string): Promise<Result> {
+export async function checkRule(
+  ruleId: string,
+  date: string,
+): Promise<Result> {
+  if (!RULE_IDS.has(ruleId)) return { ok: false, error: "Unknown rule." };
+  if (ruleId === DIARY_RULE_ID) {
+    return {
+      ok: false,
+      error: "The diary rule checks automatically once you write in it.",
+    };
+  }
+
   const gate = await requireAdmin();
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  const found = await getOrCreateActiveForToday(date);
-  if ("error" in found) return { ok: false, error: found.error };
+  const check = await getOrCreateActiveForToday(date);
+  if ("error" in check) return { ok: false, error: check.error };
 
-  const { error } = await svc
-    .from("challenge_checks")
-    .insert({ challenge_id: found.challengeId, date });
+  const { error } = await svc.from("challenge_checks").insert({
+    challenge_id: check.challengeId,
+    rule_id: ruleId,
+    date,
+  });
 
   if (error && error.code !== "23505") {
     return { ok: false, error: error.message };
@@ -452,25 +476,34 @@ export async function markDayComplete(date: string): Promise<Result> {
   return { ok: true };
 }
 
-export async function unmarkDayComplete(date: string): Promise<Result> {
+export async function uncheckRule(
+  ruleId: string,
+  date: string,
+): Promise<Result> {
+  if (!RULE_IDS.has(ruleId)) return { ok: false, error: "Unknown rule." };
+  if (ruleId === DIARY_RULE_ID) {
+    return { ok: false, error: "Clear the diary text to uncheck." };
+  }
+
   const gate = await requireAdmin();
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  const { data } = await svc
+  const { data: active } = await svc
     .from("challenges")
     .select("id, timezone")
     .eq("status", "active")
     .maybeSingle();
-  if (!data) return { ok: false, error: "No active attempt." };
-  if (date !== todayInTz((data.timezone as string) || TIMEZONE)) {
+  if (!active) return { ok: false, error: "No active attempt." };
+  if (date !== todayInTz((active.timezone as string) || TIMEZONE)) {
     return { ok: false, error: "You can only edit today." };
   }
 
   const { error } = await svc
     .from("challenge_checks")
     .delete()
-    .eq("challenge_id", data.id)
+    .eq("challenge_id", active.id)
+    .eq("rule_id", ruleId)
     .eq("date", date);
 
   if (error) return { ok: false, error: error.message };
@@ -531,6 +564,55 @@ export async function saveDiary(
     .upsert({ date, content: clean }, { onConflict: "date" });
 
   if (error) return { ok: false, error: error.message };
+
+  // Auto-start today's attempt if none is active and the diary has content.
+  let { data: active } = await svc
+    .from("challenges")
+    .select("id, start_date, target_days")
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (!active && clean.trim().length > 0) {
+    const { data: created } = await svc
+      .from("challenges")
+      .insert({
+        target_days: TARGET_DAYS,
+        start_date: date,
+        status: "active",
+        timezone: TIMEZONE,
+      })
+      .select("id, start_date, target_days")
+      .single();
+    active = created ?? null;
+  }
+
+  // Auto-sync the diary rule check with content presence.
+  if (active) {
+    const inAttempt =
+      daysBetween(active.start_date as string, date) >= 0 &&
+      daysBetween(active.start_date as string, date) <
+        (active.target_days as number);
+    if (inAttempt) {
+      if (clean.trim().length > 0) {
+        await svc
+          .from("challenge_checks")
+          .insert({
+            challenge_id: active.id,
+            rule_id: DIARY_RULE_ID,
+            date,
+          })
+          .then(() => undefined, () => undefined);
+      } else {
+        await svc
+          .from("challenge_checks")
+          .delete()
+          .eq("challenge_id", active.id)
+          .eq("rule_id", DIARY_RULE_ID)
+          .eq("date", date);
+      }
+    }
+  }
+
   return { ok: true };
 }
 

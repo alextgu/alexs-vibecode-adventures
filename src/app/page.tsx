@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { getHomeData, getDiary } from "@/lib/challenges";
+import { listGoals } from "@/lib/goals";
 import { Calendar } from "@/components/Calendar";
-import { DayCompleteToggle } from "@/components/DayCompleteToggle";
+import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
 import { LockButton } from "@/components/LockButton";
 import { AbandonAttemptButton } from "@/components/AttemptControls";
 import { ModalShell } from "@/components/ModalShell";
+import { GoalsSection } from "@/components/GoalsSection";
 
 export default async function Home({
   searchParams,
@@ -14,10 +16,10 @@ export default async function Home({
 }) {
   const sp = await searchParams;
   const data = await getHomeData({ ym: sp.ym, d: sp.d });
+  const goals = await listGoals();
 
   const isAdmin = data.is_admin;
   const modalOpen = typeof sp.d === "string" && sp.d.length > 0;
-
   const canEdit = isAdmin && data.selected.is_today;
 
   const selectedDiary =
@@ -60,13 +62,14 @@ export default async function Home({
 
       <StreakBanner data={data} />
 
-      <GoalsSection goals={data.goals} />
+      <GoalsSection goals={goals} isAdmin={isAdmin} />
 
       <Calendar
         ym={data.month.ym}
         label={data.month.label}
         cells={data.month.cells}
         selectedDate={modalOpen ? data.selected.date : ""}
+        totalRules={data.rules.length}
       />
 
       {modalOpen && (
@@ -90,6 +93,11 @@ function StreakBanner({
   const attempt = data.attempt;
   const isAdmin = data.is_admin;
   const longest = data.history.longest_streak;
+  const total = data.rules.length;
+
+  // Today's score = current-day check count (regardless of attempt status).
+  const todayCell = data.month.cells.find((c) => c.day.is_today);
+  const todayScore = todayCell ? todayCell.day.checked.length : 0;
 
   const bannerBase: React.CSSProperties = {
     border: "2px solid #000",
@@ -115,10 +123,10 @@ function StreakBanner({
           <div style={{ fontSize: 13, marginTop: 4 }}>
             day streak · of {attempt.target_days}
           </div>
-          <MetaLines
-            startedOn={attempt.start_date}
-            longest={longest}
-          />
+          <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>
+            Today: {todayScore}/{total}
+          </div>
+          <MetaLines startedOn={attempt.start_date} longest={longest} />
         </div>
         {isAdmin && <AbandonAttemptButton />}
       </section>
@@ -149,7 +157,7 @@ function StreakBanner({
         <div style={{ fontSize: 24, fontWeight: 700 }}>Failed on Day {day}</div>
         <div style={{ fontSize: 13, marginTop: 4 }}>
           {isAdmin
-            ? "Mark today complete to start a new attempt."
+            ? "Check today's first rule to start a new attempt."
             : "Waiting on the next attempt."}
         </div>
         <MetaLines startedOn={attempt.start_date} longest={longest} />
@@ -162,7 +170,7 @@ function StreakBanner({
       <div style={{ fontSize: 24, fontWeight: 700 }}>No attempt yet</div>
       <div style={{ fontSize: 13, marginTop: 4 }}>
         {isAdmin
-          ? "Mark today complete to start."
+          ? "Check today's first rule to start."
           : "Waiting on the next attempt."}
       </div>
       <MetaLines startedOn={null} longest={longest} />
@@ -185,33 +193,6 @@ function MetaLines({
   );
 }
 
-function GoalsSection({
-  goals,
-}: {
-  goals: Awaited<ReturnType<typeof getHomeData>>["goals"];
-}) {
-  if (goals.length === 0) return null;
-  return (
-    <section
-      style={{
-        border: "1px solid #000",
-        padding: "12px 16px",
-        marginBottom: 16,
-      }}
-    >
-      <h2 style={{ fontSize: 14, margin: "0 0 8px" }}>Goals</h2>
-      <ul style={{ paddingLeft: 20, margin: 0 }}>
-        {goals.map((g) => (
-          <li key={g.id} style={{ fontSize: 14 }}>
-            {g.title}
-            {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function SelectedDayPanel({
   data,
   selectedDiary,
@@ -228,9 +209,12 @@ function SelectedDayPanel({
 
   return (
     <div>
-      <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 6 }}>
+      <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 4 }}>
         {dayLabel}
       </h2>
+      <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 12 }}>
+        Score: {s.checked.length}/{data.rules.length}
+      </div>
 
       {!s.in_attempt && !s.is_today && (
         <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 10 }}>
@@ -246,25 +230,18 @@ function SelectedDayPanel({
         </div>
       )}
 
-      <pre
-        style={{
-          fontFamily: "inherit",
-          whiteSpace: "pre-wrap",
-          margin: 0,
-          marginBottom: 16,
-          fontSize: 13,
-          opacity: 0.85,
-        }}
-      >
-        {data.description}
-      </pre>
-
       <div style={{ marginBottom: 16 }}>
-        <DayCompleteToggle
-          date={s.date}
-          completed={s.completed}
-          disabled={!canEdit}
-        />
+        {data.rules.map((r) => (
+          <ChecklistRow
+            key={r.id}
+            ruleId={r.id}
+            label={r.label}
+            date={s.date}
+            checked={s.checked.includes(r.id)}
+            disabled={!canEdit}
+            auto={r.auto === "diary"}
+          />
+        ))}
       </div>
 
       {isAdmin && (

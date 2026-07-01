@@ -9,11 +9,13 @@ export function Calendar({
   label,
   cells,
   selectedDate,
+  totalRules,
 }: {
   ym: string;
   label: string;
   cells: MonthCell[];
   selectedDate: string;
+  totalRules: number;
 }) {
   const prev = prevMonth(ym);
   const next = nextMonth(ym);
@@ -50,7 +52,13 @@ export function Calendar({
         ))}
 
         {cells.map((c) => (
-          <DayCell key={c.date} cell={c} selectedDate={selectedDate} ym={ym} />
+          <DayCell
+            key={c.date}
+            cell={c}
+            selectedDate={selectedDate}
+            ym={ym}
+            totalRules={totalRules}
+          />
         ))}
       </div>
     </div>
@@ -61,10 +69,12 @@ function DayCell({
   cell,
   selectedDate,
   ym,
+  totalRules,
 }: {
   cell: MonthCell;
   selectedDate: string;
   ym: string;
+  totalRules: number;
 }) {
   const { day, day_of_month, in_month, date } = cell;
   const isSelected = date === selectedDate;
@@ -78,14 +88,16 @@ function DayCell({
   if (!in_month) {
     fg = "#bbb";
     borderColor = "#eee";
-  } else if (day.completed) {
-    bg = "#000";
-    fg = "#fff";
-    mark = "✓";
   } else if (day.failed) {
     bg = "#000";
     fg = "#fff";
     mark = "✗";
+  } else if (day.in_attempt && day.all_checked) {
+    bg = "#000";
+    fg = "#fff";
+    mark = "✓";
+  } else if (day.in_attempt && !day.is_future) {
+    mark = `${day.checked.length}/${totalRules}`;
   }
 
   if (isSelected) {
@@ -116,7 +128,7 @@ function DayCell({
       <div
         style={{
           textAlign: "center",
-          fontSize: 20,
+          fontSize: mark.length > 1 ? 14 : 20,
           marginTop: 6,
           fontWeight: 700,
         }}

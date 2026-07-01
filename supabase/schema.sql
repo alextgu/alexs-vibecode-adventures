@@ -126,13 +126,15 @@ create policy "public_select" on public.challenges for select using (true);
 revoke all on public.challenges from anon, authenticated;
 grant select on public.challenges to anon, authenticated;
 
--- One row per day marked complete. Absence = not complete.
+-- One row per rule-per-day when checked. Absence = unchecked.
+-- rule_id matches an id from RULES in src/lib/config.ts.
 create table public.challenge_checks (
   id           uuid primary key default gen_random_uuid(),
   challenge_id uuid not null references public.challenges(id) on delete cascade,
+  rule_id      text not null,
   date         date not null,
   created_at   timestamptz not null default now(),
-  unique (challenge_id, date)
+  unique (challenge_id, rule_id, date)
 );
 
 create index challenge_checks_challenge_date_idx
@@ -168,3 +170,31 @@ create policy "public_select" on public.diary_entries for select using (true);
 
 revoke all on public.diary_entries from anon, authenticated;
 grant select on public.diary_entries to anon, authenticated;
+
+-- Long-term goals shown alongside the challenge. Independent of attempts
+-- and independent of the daily-complete streak.
+drop table if exists public.goals;
+create table public.goals (
+  id           uuid primary key default gen_random_uuid(),
+  title        text not null,
+  note         text,
+  completed_at timestamptz,
+  position     int  not null default 0,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+drop trigger if exists goals_set_updated_at on public.goals;
+create trigger goals_set_updated_at
+  before update on public.goals
+  for each row execute function public.set_updated_at();
+
+create index goals_position_idx on public.goals (position, created_at);
+
+alter table public.goals enable row level security;
+
+drop policy if exists "public_select" on public.goals;
+create policy "public_select" on public.goals for select using (true);
+
+revoke all on public.goals from anon, authenticated;
+grant select on public.goals to anon, authenticated;
