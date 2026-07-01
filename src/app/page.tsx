@@ -4,10 +4,8 @@ import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
 import { LockButton } from "@/components/LockButton";
-import {
-  StartAttemptButton,
-  AbandonAttemptButton,
-} from "@/components/AttemptControls";
+import { AbandonAttemptButton } from "@/components/AttemptControls";
+import { ModalShell } from "@/components/ModalShell";
 
 export default async function Home({
   searchParams,
@@ -18,11 +16,16 @@ export default async function Home({
   const data = await getHomeData({ ym: sp.ym, d: sp.d });
 
   const isAdmin = data.is_admin;
-  const selectedIsToday = data.selected.is_today;
-  const canEdit = isAdmin && selectedIsToday;
+  const modalOpen = typeof sp.d === "string" && sp.d.length > 0;
+
+  // Editable when admin is unlocked AND the selected day is today.
+  const canEdit = isAdmin && data.selected.is_today;
 
   // Diary content is admin-only; getDiary returns "" for non-admin.
-  const selectedDiary = isAdmin ? await getDiary(data.selected.date) : "";
+  const selectedDiary =
+    isAdmin && modalOpen ? await getDiary(data.selected.date) : "";
+
+  const closeHref = `/?ym=${data.month.ym}`;
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
@@ -57,24 +60,14 @@ export default async function Home({
         </div>
       )}
 
-      <StatusLine data={data} />
-
-      <hr />
+      <StreakBanner data={data} />
 
       <Calendar
         ym={data.month.ym}
         label={data.month.label}
         cells={data.month.cells}
-        selectedDate={data.selected.date}
+        selectedDate={modalOpen ? data.selected.date : ""}
         totalRules={data.rules.length}
-      />
-
-      <hr />
-
-      <SelectedDayPanel
-        data={data}
-        selectedDiary={selectedDiary}
-        canEdit={canEdit}
       />
 
       {data.goals.length > 0 && (
@@ -86,9 +79,7 @@ export default async function Home({
               {data.goals.map((g) => (
                 <li key={g.id}>
                   {g.title}
-                  {g.note && (
-                    <span style={{ opacity: 0.7 }}> — {g.note}</span>
-                  )}
+                  {g.note && <span style={{ opacity: 0.7 }}> — {g.note}</span>}
                 </li>
               ))}
             </ul>
@@ -96,11 +87,20 @@ export default async function Home({
         </>
       )}
 
+      {modalOpen && (
+        <ModalShell closeHref={closeHref}>
+          <SelectedDayPanel
+            data={data}
+            selectedDiary={selectedDiary}
+            canEdit={canEdit}
+          />
+        </ModalShell>
+      )}
     </main>
   );
 }
 
-function StatusLine({
+function StreakBanner({
   data,
 }: {
   data: Awaited<ReturnType<typeof getHomeData>>;
@@ -108,59 +108,100 @@ function StatusLine({
   const attempt = data.attempt;
   const isAdmin = data.is_admin;
 
-  if (!attempt) {
+  // Active attempt → big streak number.
+  if (attempt && attempt.status === "active") {
     return (
-      <section style={{ margin: "12px 0" }}>
-        <div style={{ fontWeight: 700 }}>No active attempt.</div>
-        {data.history.last_outcome && (
-          <LastOutcomeLine outcome={data.history.last_outcome} />
-        )}
-        {isAdmin && (
-          <div style={{ marginTop: 8 }}>
-            <StartAttemptButton />
+      <section
+        style={{
+          border: "2px solid #000",
+          padding: "16px 20px",
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 48, fontWeight: 700, lineHeight: 1 }}>
+            {attempt.current_day ?? "?"}
           </div>
-        )}
-      </section>
-    );
-  }
-
-  if (attempt.status === "active") {
-    return (
-      <section style={{ margin: "12px 0" }}>
-        <div style={{ fontWeight: 700 }}>
-          Day {attempt.current_day ?? "?"} / {attempt.target_days} — since{" "}
-          {attempt.start_date}
+          <div style={{ fontSize: 13, marginTop: 4 }}>
+            day streak · of {attempt.target_days}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+            since {attempt.start_date}
+          </div>
         </div>
-        {isAdmin && (
-          <div style={{ marginTop: 8 }}>
-            <AbandonAttemptButton />
-          </div>
-        )}
+        {isAdmin && <AbandonAttemptButton />}
       </section>
     );
   }
 
+  // Completed → trophy.
+  if (attempt && attempt.status === "completed") {
+    return (
+      <section
+        style={{
+          border: "2px solid #000",
+          padding: "16px 20px",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: 32, fontWeight: 700, lineHeight: 1 }}>
+          {attempt.target_days} / {attempt.target_days} ✓
+        </div>
+        <div style={{ fontSize: 13, marginTop: 4 }}>
+          Completed
+          {attempt.completed_at ? ` on ${attempt.completed_at.slice(0, 10)}` : ""}.
+        </div>
+      </section>
+    );
+  }
+
+  // Failed → next attempt starts on first check.
+  if (attempt && attempt.status === "failed") {
+    const day = attempt.failed_on_date
+      ? dayFromDates(attempt.start_date, attempt.failed_on_date)
+      : "?";
+    return (
+      <section
+        style={{
+          border: "2px solid #000",
+          padding: "16px 20px",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: 24, fontWeight: 700 }}>Failed on Day {day}</div>
+        <div style={{ fontSize: 13, marginTop: 4 }}>
+          {isAdmin
+            ? "Check today's first rule to start a new attempt."
+            : "Waiting on the next attempt."}
+        </div>
+      </section>
+    );
+  }
+
+  // No attempt yet.
   return (
-    <section style={{ margin: "12px 0" }}>
-      {attempt.status === "completed" && (
-        <div style={{ fontWeight: 700 }}>
-          Completed {attempt.target_days}/{attempt.target_days} ✓
+    <section
+      style={{
+        border: "2px solid #000",
+        padding: "16px 20px",
+        marginBottom: 16,
+      }}
+    >
+      <div style={{ fontSize: 24, fontWeight: 700 }}>No attempt yet</div>
+      {data.history.last_outcome && (
+        <div style={{ fontSize: 13, marginTop: 4 }}>
+          <LastOutcomeLine outcome={data.history.last_outcome} />
         </div>
       )}
-      {attempt.status === "failed" && (
-        <div style={{ fontWeight: 700 }}>
-          Failed on Day{" "}
-          {attempt.failed_on_date
-            ? // computed on the client since we already have start_date
-              dayFromDates(attempt.start_date, attempt.failed_on_date)
-            : "?"}
-        </div>
-      )}
-      {isAdmin && (
-        <div style={{ marginTop: 8 }}>
-          <StartAttemptButton />
-        </div>
-      )}
+      <div style={{ fontSize: 13, marginTop: 4 }}>
+        {isAdmin
+          ? "Check today's first rule to start."
+          : "Waiting on the next attempt."}
+      </div>
     </section>
   );
 }
@@ -173,16 +214,10 @@ function LastOutcomeLine({
   >;
 }) {
   if (outcome.status === "completed") {
-    return (
-      <div style={{ fontSize: 13 }}>
-        Last attempt completed on {outcome.date}.
-      </div>
-    );
+    return <>Last attempt completed on {outcome.date}.</>;
   }
   return (
-    <div style={{ fontSize: 13 }}>
-      Last attempt failed on Day {outcome.day} ({outcome.date}).
-    </div>
+    <>Last attempt failed on Day {outcome.day} ({outcome.date}).</>
   );
 }
 
@@ -197,14 +232,16 @@ function SelectedDayPanel({
 }) {
   const s = data.selected;
   const attempt = data.attempt;
-  const dayLabel = s.day_num ? `Day ${s.day_num} · ${s.date}` : s.date;
   const isAdmin = data.is_admin;
+  const dayLabel = s.day_num ? `Day ${s.day_num} · ${s.date}` : s.date;
 
   return (
-    <section>
-      <h2 style={{ fontSize: 16, marginTop: 0 }}>{dayLabel}</h2>
+    <div>
+      <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 6 }}>
+        {dayLabel}
+      </h2>
 
-      {!s.in_attempt && (
+      {!s.in_attempt && !s.is_today && (
         <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 10 }}>
           {attempt
             ? "Outside the current attempt."
@@ -226,7 +263,7 @@ function SelectedDayPanel({
             label={r.label}
             date={s.date}
             checked={s.checked.includes(r.id)}
-            disabled={!canEdit || !s.in_attempt}
+            disabled={!canEdit}
             auto={r.auto === "diary"}
           />
         ))}
@@ -239,7 +276,7 @@ function SelectedDayPanel({
           disabled={!canEdit}
         />
       )}
-    </section>
+    </div>
   );
 }
 

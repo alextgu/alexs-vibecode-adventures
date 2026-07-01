@@ -6,6 +6,10 @@ import {
   getServiceSupabase,
   getPublicSupabase,
   ADMIN_COOKIE,
+  signAdminToken,
+  checkUnlockRate,
+  noteUnlockFailure,
+  clearUnlockAttempts,
 } from "@/lib/supabase";
 import {
   RULES,
@@ -383,28 +387,6 @@ async function requireAdmin(): Promise<Result | null> {
   return null;
 }
 
-export async function startAttempt(): Promise<Result> {
-  const gate = await requireAdmin();
-  if (gate) return gate;
-  const svc = getServiceSupabase();
-
-  const startDate = todayInTz(TIMEZONE);
-  const { error } = await svc.from("challenges").insert({
-    target_days: TARGET_DAYS,
-    start_date: startDate,
-    status: "active",
-    timezone: TIMEZONE,
-  });
-
-  if (error) {
-    if (error.code === "23505") {
-      return { ok: false, error: "There's already an active attempt." };
-    }
-    return { ok: false, error: error.message };
-  }
-  return { ok: true };
-}
-
 export async function abandonAttempt(): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
@@ -429,7 +411,11 @@ export async function abandonAttempt(): Promise<Result> {
   return { ok: true };
 }
 
-async function getActiveForToday(
+/**
+ * Returns the active attempt id for today. If no active attempt exists and
+ * the caller is admin, auto-creates one starting today, then returns its id.
+ */
+async function getOrCreateActiveForToday(
   date: string,
 ): Promise<{ challengeId: string } | { error: string }> {
   const svc = getServiceSupabase();
@@ -438,10 +424,32 @@ async function getActiveForToday(
     .select("id, timezone, status")
     .eq("status", "active")
     .maybeSingle();
-  if (!data) return { error: "No active attempt." };
-  const tz = (data.timezone as string) || TIMEZONE;
-  if (date !== todayInTz(tz)) return { error: "You can only edit today." };
-  return { challengeId: data.id as string };
+
+  if (data) {
+    const tz = (data.timezone as string) || TIMEZONE;
+    if (date !== todayInTz(tz)) return { error: "You can only edit today." };
+    return { challengeId: data.id as string };
+  }
+
+  // No active attempt — auto-create one starting today.
+  if (date !== todayInTz(TIMEZONE)) {
+    return { error: "You can only edit today." };
+  }
+  const { data: created, error: cErr } = await svc
+    .from("challenges")
+    .insert({
+      target_days: TARGET_DAYS,
+      start_date: date,
+      status: "active",
+      timezone: TIMEZONE,
+    })
+    .select("id")
+    .single();
+
+  if (cErr || !created) {
+    return { error: cErr?.message ?? "Failed to auto-start attempt." };
+  }
+  return { challengeId: created.id as string };
 }
 
 export async function checkRule(
@@ -460,7 +468,7 @@ export async function checkRule(
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  const check = await getActiveForToday(date);
+  const check = await getOrCreateActiveForToday(date);
   if ("error" in check) return { ok: false, error: check.error };
 
   const { error } = await svc.from("challenge_checks").insert({
@@ -488,7 +496,7 @@ export async function uncheckRule(
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  const check = await getActiveForToday(date);
+  const check = await getOrCreateActiveForToday(date);
   if ("error" in check) return { ok: false, error: check.error };
 
   const { error } = await svc
@@ -534,13 +542,27 @@ export async function saveDiary(
 
   if (error) return { ok: false, error: error.message };
 
-  // Auto-sync the diary rule check with content presence, if there's an
-  // active attempt and today falls inside it.
-  const { data: active } = await svc
+  // Auto-start today's attempt if none is active. Writing the diary counts
+  // as engagement with today's challenge.
+  let { data: active } = await svc
     .from("challenges")
     .select("id, start_date, target_days")
     .eq("status", "active")
     .maybeSingle();
+
+  if (!active && clean.trim().length > 0) {
+    const { data: created } = await svc
+      .from("challenges")
+      .insert({
+        target_days: TARGET_DAYS,
+        start_date: date,
+        status: "active",
+        timezone: TIMEZONE,
+      })
+      .select("id, start_date, target_days")
+      .single();
+    active = created ?? null;
+  }
 
   if (active) {
     const inAttempt =
@@ -583,24 +605,40 @@ export async function unlock(password: string): Promise<Result> {
   if (typeof password !== "string" || password.length === 0) {
     return { ok: false, error: "Enter a password." };
   }
-  // Constant-time compare
+
+  // Rate limit by IP.
+  const rl = await checkUnlockRate();
+  if (!rl.ok) {
+    const mins = Math.ceil(rl.retryAfterMs / 60000);
+    return {
+      ok: false,
+      error: `Too many attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`,
+    };
+  }
+
+  // Constant-time compare against ADMIN_PASSWORD.
   if (password.length !== expected.length) {
+    await noteUnlockFailure();
     return { ok: false, error: "Wrong password." };
   }
   let diff = 0;
   for (let i = 0; i < password.length; i++) {
     diff |= password.charCodeAt(i) ^ expected.charCodeAt(i);
   }
-  if (diff !== 0) return { ok: false, error: "Wrong password." };
+  if (diff !== 0) {
+    await noteUnlockFailure();
+    return { ok: false, error: "Wrong password." };
+  }
+
+  await clearUnlockAttempts();
 
   const jar = await cookies();
-  jar.set(ADMIN_COOKIE, expected, {
+  jar.set(ADMIN_COOKIE, signAdminToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    // 30 days
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: 60 * 60 * 24 * 30, // 30 days
   });
   return { ok: true };
 }
