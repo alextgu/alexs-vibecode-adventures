@@ -27,13 +27,12 @@ export default async function Home({
       <header
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           alignItems: "center",
           marginBottom: 8,
           gap: 12,
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 20 }}>Hard 75 — Alex Version</h1>
         <nav style={{ display: "flex", gap: 12, alignItems: "center" }}>
           {isAdmin ? (
             <LockButton />

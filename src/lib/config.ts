@@ -1,7 +1,6 @@
 // Personal config. Edit here, not in a UI.
 
-export const ADMIN_EMAIL = "alexwin2099@gmail.com";
-export const TITLE = "Hard 75 — Alex Version";
+export const TITLE = "Alex Calendar";
 export const TARGET_DAYS = 75;
 export const TIMEZONE = "America/Los_Angeles"; // IANA — edit to your zone
 
