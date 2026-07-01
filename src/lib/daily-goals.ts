@@ -13,7 +13,8 @@ export type DailyGoal = {
   title: string;
   note: string | null;
   position: number;
-  completed_today: boolean;
+  /** Whether this goal was completed on the date we asked about. */
+  completed: boolean;
 };
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -28,8 +29,12 @@ async function requireAdmin(): Promise<Result | null> {
   return null;
 }
 
-/** List daily goals with a flag for whether they've been done today. */
-export async function listDailyGoals(): Promise<DailyGoal[]> {
+/**
+ * List daily goals with a flag for whether they've been done on `date`.
+ * Defaults to today. Pass an ISO date to look up any other day.
+ */
+export async function listDailyGoals(date?: string): Promise<DailyGoal[]> {
+  const targetDate = date ?? todayInTz(TIMEZONE);
   const supabase = getPublicSupabase();
   const [{ data: goals }, { data: completions }] = await Promise.all([
     supabase
@@ -40,17 +45,17 @@ export async function listDailyGoals(): Promise<DailyGoal[]> {
     supabase
       .from("daily_goal_completions")
       .select("daily_goal_id")
-      .eq("date", todayInTz(TIMEZONE)),
+      .eq("date", targetDate),
   ]);
 
-  const doneToday = new Set<string>();
+  const done = new Set<string>();
   for (const c of (completions ?? []) as { daily_goal_id: string }[]) {
-    doneToday.add(c.daily_goal_id);
+    done.add(c.daily_goal_id);
   }
 
-  return ((goals ?? []) as Omit<DailyGoal, "completed_today">[]).map((g) => ({
+  return ((goals ?? []) as Omit<DailyGoal, "completed">[]).map((g) => ({
     ...g,
-    completed_today: doneToday.has(g.id),
+    completed: done.has(g.id),
   }));
 }
 

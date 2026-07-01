@@ -19,7 +19,7 @@ export function DailyGoalsSection({
 }) {
   if (goals.length === 0 && !isAdmin) return null;
 
-  const doneCount = goals.filter((g) => g.completed_today).length;
+  const doneCount = goals.filter((g) => g.completed).length;
 
   return (
     <section
@@ -75,7 +75,7 @@ function DailyGoalRow({
   const [title, setTitle] = useState(goal.title);
   const [note, setNote] = useState(goal.note ?? "");
 
-  const done = goal.completed_today;
+  const done = goal.completed;
 
   function onToggle() {
     if (!isAdmin) return;

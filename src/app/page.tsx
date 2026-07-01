@@ -10,6 +10,7 @@ import { AbandonAttemptButton } from "@/components/AttemptControls";
 import { ModalShell } from "@/components/ModalShell";
 import { GoalsSection } from "@/components/GoalsSection";
 import { DailyGoalsSection } from "@/components/DailyGoalsSection";
+import { DailyGoalsInModal } from "@/components/DailyGoalsInModal";
 
 export default async function Home({
   searchParams,
@@ -29,6 +30,11 @@ export default async function Home({
 
   const selectedDiary =
     isAdmin && modalOpen ? await getDiary(data.selected.date) : "";
+
+  // Daily-goals status for the selected day (only fetched when modal is open).
+  const selectedDailyGoals = modalOpen
+    ? await listDailyGoals(data.selected.date)
+    : [];
 
   const closeHref = `/?ym=${data.month.ym}`;
 
@@ -84,6 +90,7 @@ export default async function Home({
           <SelectedDayPanel
             data={data}
             selectedDiary={selectedDiary}
+            selectedDailyGoals={selectedDailyGoals}
             canEdit={canEdit}
           />
         </ModalShell>
@@ -203,10 +210,12 @@ function MetaLines({
 function SelectedDayPanel({
   data,
   selectedDiary,
+  selectedDailyGoals,
   canEdit,
 }: {
   data: Awaited<ReturnType<typeof getHomeData>>;
   selectedDiary: string;
+  selectedDailyGoals: Awaited<ReturnType<typeof listDailyGoals>>;
   canEdit: boolean;
 }) {
   const s = data.selected;
@@ -250,6 +259,8 @@ function SelectedDayPanel({
           />
         ))}
       </div>
+
+      <DailyGoalsInModal goals={selectedDailyGoals} canEdit={canEdit} />
 
       {isAdmin && (
         <DiaryEditor
