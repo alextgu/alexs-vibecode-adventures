@@ -308,7 +308,9 @@ export async function getHomeData(input?: {
   const checksByDate = rawAttempt
     ? await loadChecks(rawAttempt.id)
     : new Map<string, Set<string>>();
-  const diaryDates = await loadDiaryDates();
+  // Only admin sees which days have diary entries. Non-admin gets an empty set,
+  // which suppresses the calendar's diary dot.
+  const diaryDates = isAdmin ? await loadDiaryDates() : new Set<string>();
 
   let attempt = rawAttempt;
   if (attempt) {
@@ -501,8 +503,10 @@ export async function uncheckRule(
 }
 
 export async function getDiary(date: string): Promise<string> {
-  const supabase = getPublicSupabase();
-  const { data } = await supabase
+  // Diary content is admin-only. Non-admin callers get an empty string.
+  if (!(await isAdminRequest())) return "";
+  const svc = getServiceSupabase();
+  const { data } = await svc
     .from("diary_entries")
     .select("content")
     .eq("date", date)

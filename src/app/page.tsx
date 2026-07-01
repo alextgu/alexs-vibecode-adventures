@@ -16,11 +16,13 @@ export default async function Home({
 }) {
   const sp = await searchParams;
   const data = await getHomeData({ ym: sp.ym, d: sp.d });
-  const selectedDiary = await getDiary(data.selected.date);
 
   const isAdmin = data.is_admin;
   const selectedIsToday = data.selected.is_today;
   const canEdit = isAdmin && selectedIsToday;
+
+  // Diary content is admin-only; getDiary returns "" for non-admin.
+  const selectedDiary = isAdmin ? await getDiary(data.selected.date) : "";
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
@@ -94,12 +96,6 @@ export default async function Home({
         </>
       )}
 
-      <hr />
-
-      <footer style={{ fontSize: 12, opacity: 0.7 }}>
-        Timezone: {data.timezone}. Today: {data.today}. Rules and goals live in
-        <code style={{ marginLeft: 4 }}>src/lib/config.ts</code>.
-      </footer>
     </main>
   );
 }
@@ -202,6 +198,7 @@ function SelectedDayPanel({
   const s = data.selected;
   const attempt = data.attempt;
   const dayLabel = s.day_num ? `Day ${s.day_num} · ${s.date}` : s.date;
+  const isAdmin = data.is_admin;
 
   return (
     <section>
@@ -235,11 +232,13 @@ function SelectedDayPanel({
         ))}
       </div>
 
-      <DiaryEditor
-        date={s.date}
-        initial={selectedDiary}
-        disabled={!canEdit}
-      />
+      {isAdmin && (
+        <DiaryEditor
+          date={s.date}
+          initial={selectedDiary}
+          disabled={!canEdit}
+        />
+      )}
     </section>
   );
 }
