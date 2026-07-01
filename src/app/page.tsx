@@ -1,154 +1,256 @@
-import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
 import { SignInButton, UserButton } from "@clerk/nextjs";
-import {
-  getActiveChallenge,
-  getChallengeHistory,
-  type ChallengeSummary,
-} from "@/lib/challenges";
-import { StartChallengeForm } from "@/components/StartChallengeForm";
+import { getHomeData, getDiary } from "@/lib/challenges";
+import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
-import { AbandonButton } from "@/components/AbandonButton";
+import { DiaryEditor } from "@/components/DiaryEditor";
+import {
+  StartAttemptButton,
+  AbandonAttemptButton,
+} from "@/components/AttemptControls";
 
-export default async function Home() {
-  const { userId } = await auth();
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ ym?: string; d?: string }>;
+}) {
+  const sp = await searchParams;
+  const data = await getHomeData({ ym: sp.ym, d: sp.d });
+  const selectedDiary = await getDiary(data.selected.date);
+
+  const isAdmin = data.mode === "admin";
+  const selectedIsToday = data.selected.is_today;
+  const canEdit = isAdmin && selectedIsToday;
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 20px" }}>
+    <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
       <header
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 24,
+          marginBottom: 8,
+          gap: 12,
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 22 }}>Hard 75</h1>
+        <h1 style={{ margin: 0, fontSize: 20 }}>Hard 75 — Alex Version</h1>
         <nav style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          {userId ? (
-            <>
-              <Link href="/challenges">History</Link>
-              <Link href="/settings">Settings</Link>
-              <UserButton />
-            </>
-          ) : (
+          {data.mode === "signed-out" && (
             <SignInButton mode="modal">
               <button type="button">Sign in</button>
             </SignInButton>
           )}
+          {data.mode !== "signed-out" && <UserButton />}
         </nav>
       </header>
 
+      {data.mode === "not-admin" && (
+        <div
+          style={{
+            border: "1px solid #000",
+            padding: "8px 10px",
+            marginBottom: 12,
+            fontSize: 13,
+          }}
+        >
+          Not admin. View-only.
+        </div>
+      )}
+
+      <StatusLine data={data} />
+
       <hr />
 
-      {!userId ? (
-        <SignedOutHero />
-      ) : (
-        <SignedInHub />
+      <Calendar
+        ym={data.month.ym}
+        label={data.month.label}
+        cells={data.month.cells}
+        selectedDate={data.selected.date}
+        totalRules={data.rules.length}
+      />
+
+      <hr />
+
+      <SelectedDayPanel
+        data={data}
+        selectedDiary={selectedDiary}
+        canEdit={canEdit}
+      />
+
+      {data.goals.length > 0 && (
+        <>
+          <hr />
+          <section>
+            <h2 style={{ fontSize: 16, marginTop: 0 }}>Goals</h2>
+            <ul style={{ paddingLeft: 20, margin: 0 }}>
+              {data.goals.map((g) => (
+                <li key={g.id}>
+                  {g.title}
+                  {g.note && (
+                    <span style={{ opacity: 0.7 }}> — {g.note}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
       )}
+
+      <hr />
+
+      <footer style={{ fontSize: 12, opacity: 0.7 }}>
+        Timezone: {data.timezone}. Today: {data.today}. Rules and goals live in
+        <code style={{ marginLeft: 4 }}>src/lib/config.ts</code>.
+      </footer>
     </main>
   );
 }
 
-function SignedOutHero() {
-  return (
-    <section>
-      <h2 style={{ marginTop: 0 }}>75 days. Every rule. Every day.</h2>
-      <p>
-        Define your own daily rules. Check them all off every day for 75 days
-        straight. Miss one and you restart.
-      </p>
-      <p>Sign in to start.</p>
-    </section>
-  );
-}
+function StatusLine({
+  data,
+}: {
+  data: Awaited<ReturnType<typeof getHomeData>>;
+}) {
+  const attempt = data.attempt;
+  const isAdmin = data.mode === "admin";
 
-async function SignedInHub() {
-  const active = await getActiveChallenge();
-
-  if (active) {
-    const done = active.today_checks.length;
-    const total = active.rules.length;
-    const allDone = done === total;
-
+  if (!attempt) {
     return (
-      <section>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{active.title}</div>
-          <div>
-            Day {active.current_day} / {active.target_days} —{" "}
-            {done}/{total} today
-            {allDone ? " ✓" : ""}
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          {active.rules.map((r) => (
-            <ChecklistRow
-              key={r.id}
-              challengeId={active.id}
-              ruleId={r.id}
-              label={r.label}
-              date={active.today}
-              checked={active.today_checks.includes(r.id)}
-            />
-          ))}
-        </div>
-
-        {allDone && (
-          <div style={{ margin: "12px 0", fontWeight: 700 }}>
-            Day {active.current_day} complete.
+      <section style={{ margin: "12px 0" }}>
+        <div style={{ fontWeight: 700 }}>No active attempt.</div>
+        {data.history.last_outcome && (
+          <LastOutcomeLine outcome={data.history.last_outcome} />
+        )}
+        {isAdmin && (
+          <div style={{ marginTop: 8 }}>
+            <StartAttemptButton />
           </div>
         )}
-
-        <div style={{ marginTop: 24 }}>
-          <AbandonButton challengeId={active.id} />
-        </div>
       </section>
     );
   }
 
-  const history = await getChallengeHistory();
-  const mostRecent = history[0];
+  if (attempt.status === "active") {
+    return (
+      <section style={{ margin: "12px 0" }}>
+        <div style={{ fontWeight: 700 }}>
+          Day {attempt.current_day ?? "?"} / {attempt.target_days} — since{" "}
+          {attempt.start_date}
+        </div>
+        {isAdmin && (
+          <div style={{ marginTop: 8 }}>
+            <AbandonAttemptButton />
+          </div>
+        )}
+      </section>
+    );
+  }
 
   return (
-    <section>
-      {mostRecent && (
-        <div style={{ marginBottom: 24 }}>
-          <PostStateBadge attempt={mostRecent} />
+    <section style={{ margin: "12px 0" }}>
+      {attempt.status === "completed" && (
+        <div style={{ fontWeight: 700 }}>
+          Completed {attempt.target_days}/{attempt.target_days} ✓
         </div>
       )}
-      <StartChallengeForm />
+      {attempt.status === "failed" && (
+        <div style={{ fontWeight: 700 }}>
+          Failed on Day{" "}
+          {attempt.failed_on_date
+            ? // computed on the client since we already have start_date
+              dayFromDates(attempt.start_date, attempt.failed_on_date)
+            : "?"}
+        </div>
+      )}
+      {isAdmin && (
+        <div style={{ marginTop: 8 }}>
+          <StartAttemptButton />
+        </div>
+      )}
     </section>
   );
 }
 
-function PostStateBadge({ attempt }: { attempt: ChallengeSummary }) {
-  if (attempt.status === "completed") {
+function LastOutcomeLine({
+  outcome,
+}: {
+  outcome: NonNullable<
+    Awaited<ReturnType<typeof getHomeData>>["history"]["last_outcome"]
+  >;
+}) {
+  if (outcome.status === "completed") {
     return (
-      <div>
-        <div style={{ fontWeight: 700 }}>
-          {attempt.title} · {attempt.target_days}/{attempt.target_days} ✓
-        </div>
-        <div>
-          Completed
-          {attempt.completed_at
-            ? ` on ${attempt.completed_at.slice(0, 10)}`
-            : ""}
-          .
-        </div>
+      <div style={{ fontSize: 13 }}>
+        Last attempt completed on {outcome.date}.
       </div>
     );
   }
-  if (attempt.status === "failed") {
-    return (
-      <div>
-        <div style={{ fontWeight: 700 }}>
-          {attempt.title} · failed on Day {attempt.outcome_day}
+  return (
+    <div style={{ fontSize: 13 }}>
+      Last attempt failed on Day {outcome.day} ({outcome.date}).
+    </div>
+  );
+}
+
+function SelectedDayPanel({
+  data,
+  selectedDiary,
+  canEdit,
+}: {
+  data: Awaited<ReturnType<typeof getHomeData>>;
+  selectedDiary: string;
+  canEdit: boolean;
+}) {
+  const s = data.selected;
+  const attempt = data.attempt;
+  const dayLabel = s.day_num ? `Day ${s.day_num} · ${s.date}` : s.date;
+
+  return (
+    <section>
+      <h2 style={{ fontSize: 16, marginTop: 0 }}>{dayLabel}</h2>
+
+      {!s.in_attempt && (
+        <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 10 }}>
+          {attempt
+            ? "Outside the current attempt."
+            : "No active attempt on this date."}
         </div>
-        <div>Start over below.</div>
+      )}
+
+      {s.failed && (
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>
+          This is where the attempt failed.
+        </div>
+      )}
+
+      <div style={{ marginBottom: 16 }}>
+        {data.rules.map((r) => (
+          <ChecklistRow
+            key={r.id}
+            ruleId={r.id}
+            label={r.label}
+            date={s.date}
+            checked={s.checked.includes(r.id)}
+            disabled={!canEdit || !s.in_attempt}
+            auto={r.auto === "diary"}
+          />
+        ))}
       </div>
-    );
-  }
-  return null;
+
+      <DiaryEditor
+        date={s.date}
+        initial={selectedDiary}
+        disabled={!canEdit}
+      />
+    </section>
+  );
+}
+
+function dayFromDates(start: string, target: string): number {
+  const [sy, sm, sd] = start.split("-").map(Number);
+  const [ty, tm, td] = target.split("-").map(Number);
+  const diff = Math.round(
+    (Date.UTC(ty, tm - 1, td) - Date.UTC(sy, sm - 1, sd)) /
+      (1000 * 60 * 60 * 24),
+  );
+  return diff + 1;
 }

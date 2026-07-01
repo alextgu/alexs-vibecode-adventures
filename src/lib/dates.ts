@@ -39,6 +39,22 @@ export function dateRange(start: string, count: number): string[] {
   return out;
 }
 
+/** "YYYY-MM" → the previous month's "YYYY-MM". */
+export function prevMonth(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  const nm = m === 1 ? 12 : m - 1;
+  const ny = m === 1 ? y - 1 : y;
+  return `${ny}-${String(nm).padStart(2, "0")}`;
+}
+
+/** "YYYY-MM" → the next month's "YYYY-MM". */
+export function nextMonth(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  const nm = m === 12 ? 1 : m + 1;
+  const ny = m === 12 ? y + 1 : y;
+  return `${ny}-${String(nm).padStart(2, "0")}`;
+}
+
 const IANA_TZ = /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/;
 
 /** Coarse IANA timezone validation. Also verifies Intl accepts it. */
