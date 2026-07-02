@@ -10,54 +10,119 @@ import {
   type AdminTodo,
 } from "@/lib/admin-todos";
 
+const COMPLETED_WARN_THRESHOLD = 100;
+
 export function AdminTodosSection({ todos }: { todos: AdminTodo[] }) {
   const [showCompleted, setShowCompleted] = useState(false);
 
-  const open = todos.filter((t) => !t.completed_on);
-  const done = todos.filter((t) => t.completed_on);
+  const open = todos
+    .filter((t) => !t.completed_on)
+    .sort((a, b) => {
+      const ad = a.target_date ?? "￿";
+      const bd = b.target_date ?? "￿";
+      if (ad !== bd) return ad.localeCompare(bd);
+      return a.title.localeCompare(b.title);
+    });
+
+  const done = todos
+    .filter((t) => t.completed_on)
+    .sort((a, b) =>
+      (b.completed_on ?? "").localeCompare(a.completed_on ?? ""),
+    );
 
   return (
     <section
       style={{
         border: "1px solid #000",
-        padding: "12px 16px",
         marginTop: 16,
+        height: 600,
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          marginBottom: 8,
-          gap: 8,
+          padding: "12px 16px",
+          borderBottom: "1px solid #000",
         }}
       >
-        <h2 style={{ fontSize: 14, margin: 0 }}>To-do</h2>
-        <button
-          type="button"
-          onClick={() => setShowCompleted((v) => !v)}
-          style={{ fontSize: 12, padding: "2px 6px" }}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: 8,
+            gap: 8,
+          }}
         >
-          {showCompleted ? "Hide" : "Show"} completed ({done.length})
-        </button>
+          <h2 style={{ fontSize: 14, margin: 0 }}>To-do</h2>
+          <button
+            type="button"
+            onClick={() => setShowCompleted((v) => !v)}
+            style={{ fontSize: 12, padding: "2px 6px" }}
+          >
+            {showCompleted ? "Hide" : "Show"} completed ({done.length})
+          </button>
+        </div>
+        <AddTodoForm />
       </div>
 
-      {open.length === 0 && !showCompleted && (
-        <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 8 }}>
-          Nothing to do.
-        </div>
-      )}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px 24px" }}>
+        {open.length === 0 ? (
+          <div style={{ fontSize: 13, opacity: 0.7, padding: "6px 0" }}>
+            Nothing to do.
+          </div>
+        ) : (
+          <ul style={{ padding: 0, margin: 0, listStyle: "none" }}>
+            {open.map((t) => (
+              <TodoRow key={t.id} todo={t} />
+            ))}
+          </ul>
+        )}
 
-      <ul style={{ padding: 0, margin: 0, listStyle: "none" }}>
-        {open.map((t) => (
-          <TodoRow key={t.id} todo={t} />
-        ))}
-        {showCompleted &&
-          done.map((t) => <TodoRow key={t.id} todo={t} />)}
-      </ul>
-
-      <AddTodoForm />
+        {showCompleted && (
+          <div style={{ marginTop: 20 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+                opacity: 0.7,
+                padding: "6px 0 4px",
+                borderBottom: "1px solid #000",
+              }}
+            >
+              Completed · {done.length}
+            </div>
+            {done.length > COMPLETED_WARN_THRESHOLD && (
+              <div
+                style={{
+                  fontSize: 12,
+                  padding: "6px 8px",
+                  margin: "6px 0",
+                  border: "1px solid #000",
+                  background: "#fff5b8",
+                }}
+              >
+                Warning: {done.length} completed items — this list may be slow
+                to scroll.
+              </div>
+            )}
+            {done.length === 0 ? (
+              <div style={{ fontSize: 13, opacity: 0.7, padding: "6px 0" }}>
+                None yet.
+              </div>
+            ) : (
+              <ul style={{ padding: 0, margin: 0, listStyle: "none" }}>
+                {done.map((t) => (
+                  <TodoRow key={t.id} todo={t} />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
@@ -179,15 +244,21 @@ function TodoRow({ todo }: { todo: AdminTodo }) {
         <span style={{ textDecoration: done ? "line-through" : "none" }}>
           {todo.title}
         </span>
-        {todo.target_date && (
-          <span style={{ opacity: 0.7, fontSize: 12 }}>
-            {" "}· {todo.target_date}
-          </span>
-        )}
         {todo.note && (
           <span style={{ opacity: 0.7 }}> — {todo.note}</span>
         )}
       </div>
+      {todo.target_date && (
+        <span
+          style={{
+            fontSize: 12,
+            opacity: 0.7,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {todo.target_date}
+        </span>
+      )}
       <button
         type="button"
         onClick={() => setEditing(true)}
@@ -238,7 +309,6 @@ function AddTodoForm() {
     <form
       onSubmit={submit}
       style={{
-        marginTop: 8,
         display: "flex",
         flexWrap: "wrap",
         gap: 6,

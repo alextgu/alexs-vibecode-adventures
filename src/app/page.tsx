@@ -56,7 +56,13 @@ export default async function Home({
   }
 
   return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
+    <main
+      style={{
+        maxWidth: 720,
+        margin: "0 auto",
+        padding: "24px 16px 640px",
+      }}
+    >
       <header
         style={{
           display: "flex",
