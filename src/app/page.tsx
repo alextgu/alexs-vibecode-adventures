@@ -38,6 +38,13 @@ export default async function Home({
 
   const closeHref = `/?ym=${data.month.ym}`;
 
+  const goalsByDate: Record<string, string[]> = {};
+  for (const g of goals) {
+    if (g.target_date) {
+      (goalsByDate[g.target_date] ??= []).push(g.title);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
       <header
@@ -83,6 +90,7 @@ export default async function Home({
         cells={data.month.cells}
         selectedDate={modalOpen ? data.selected.date : ""}
         totalRules={data.rules.length}
+        goalsByDate={goalsByDate}
       />
 
       {modalOpen && (

@@ -10,12 +10,14 @@ export function Calendar({
   cells,
   selectedDate,
   totalRules,
+  goalsByDate,
 }: {
   ym: string;
   label: string;
   cells: MonthCell[];
   selectedDate: string;
   totalRules: number;
+  goalsByDate: Record<string, string[]>;
 }) {
   const prev = prevMonth(ym);
   const next = nextMonth(ym);
@@ -58,6 +60,7 @@ export function Calendar({
             selectedDate={selectedDate}
             ym={ym}
             totalRules={totalRules}
+            goalTitles={goalsByDate[c.date] ?? []}
           />
         ))}
       </div>
@@ -70,11 +73,13 @@ function DayCell({
   selectedDate,
   ym,
   totalRules,
+  goalTitles,
 }: {
   cell: MonthCell;
   selectedDate: string;
   ym: string;
   totalRules: number;
+  goalTitles: string[];
 }) {
   const { day, day_of_month, in_month, date } = cell;
   const isSelected = date === selectedDate;
@@ -100,12 +105,16 @@ function DayCell({
     mark = `${day.checked.length}/${totalRules}`;
   }
 
+  if (day.is_today && bg === "#fff") {
+    bg = "#fff5b8";
+  }
+
   if (isSelected) {
     borderColor = "#000";
     borderWidth = 3;
   } else if (day.is_today) {
     borderColor = "#000";
-    borderWidth = 2;
+    borderWidth = 3;
   }
 
   return (
@@ -122,8 +131,32 @@ function DayCell({
         position: "relative",
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: day.is_today ? 700 : 400 }}>
-        {day_of_month}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: day.is_today ? 700 : 400 }}>
+          {day_of_month}
+        </span>
+        {day.is_today && (
+          <span
+            style={{
+              fontSize: 8,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              padding: "1px 4px",
+              border: `1px solid ${fg}`,
+              borderRadius: 3,
+              lineHeight: 1,
+            }}
+          >
+            TODAY
+          </span>
+        )}
       </div>
       <div
         style={{
@@ -148,6 +181,27 @@ function DayCell({
             background: fg,
           }}
         />
+      )}
+      {in_month && goalTitles.length > 0 && (
+        <div
+          title={goalTitles.join("\n")}
+          style={{
+            position: "absolute",
+            left: 4,
+            right: 4,
+            bottom: 3,
+            fontSize: 9,
+            lineHeight: 1.1,
+            fontWeight: 600,
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            textOverflow: "ellipsis",
+            opacity: 0.85,
+          }}
+        >
+          ★ {goalTitles[0]}
+          {goalTitles.length > 1 ? ` +${goalTitles.length - 1}` : ""}
+        </div>
       )}
     </Link>
   );
