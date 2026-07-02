@@ -52,6 +52,7 @@ function GoalRow({ goal, isAdmin }: { goal: Goal; isAdmin: boolean }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(goal.title);
   const [note, setNote] = useState(goal.note ?? "");
+  const [targetDate, setTargetDate] = useState(goal.target_date ?? "");
 
   function onToggle() {
     startTransition(async () => {
@@ -72,7 +73,11 @@ function GoalRow({ goal, isAdmin }: { goal: Goal; isAdmin: boolean }) {
 
   function onSave() {
     startTransition(async () => {
-      const res = await updateGoal(goal.id, { title, note: note || null });
+      const res = await updateGoal(goal.id, {
+        title,
+        note: note || null,
+        target_date: targetDate || null,
+      });
       if (!res.ok) {
         alert(res.error);
         return;
@@ -107,6 +112,31 @@ function GoalRow({ goal, isAdmin }: { goal: Goal; isAdmin: boolean }) {
           style={{ width: "100%", marginBottom: 6 }}
           maxLength={1000}
         />
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            marginBottom: 6,
+          }}
+        >
+          <span style={{ opacity: 0.7 }}>Target date</span>
+          <input
+            type="date"
+            value={targetDate}
+            onChange={(e) => setTargetDate(e.target.value)}
+          />
+          {targetDate && (
+            <button
+              type="button"
+              onClick={() => setTargetDate("")}
+              style={{ fontSize: 12, padding: "2px 6px" }}
+            >
+              Clear
+            </button>
+          )}
+        </label>
         <div style={{ display: "flex", gap: 6 }}>
           <button type="button" onClick={onSave} disabled={pending}>
             {pending ? "…" : "Save"}
@@ -116,6 +146,7 @@ function GoalRow({ goal, isAdmin }: { goal: Goal; isAdmin: boolean }) {
             onClick={() => {
               setTitle(goal.title);
               setNote(goal.note ?? "");
+              setTargetDate(goal.target_date ?? "");
               setEditing(false);
             }}
             disabled={pending}
@@ -156,6 +187,9 @@ function GoalRow({ goal, isAdmin }: { goal: Goal; isAdmin: boolean }) {
         {goal.note && (
           <span style={{ opacity: 0.7 }}> — {goal.note}</span>
         )}
+        {goal.target_date && (
+          <span style={{ opacity: 0.7 }}> · by {goal.target_date}</span>
+        )}
       </div>
       {isAdmin && (
         <>
@@ -184,6 +218,7 @@ function AddGoalForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
+  const [targetDate, setTargetDate] = useState("");
   const [pending, startTransition] = useTransition();
 
   function submit(e: React.FormEvent) {
@@ -193,6 +228,7 @@ function AddGoalForm() {
       const res = await createGoal({
         title,
         note: note.trim().length > 0 ? note : undefined,
+        target_date: targetDate || null,
       });
       if (!res.ok) {
         alert(res.error);
@@ -200,19 +236,23 @@ function AddGoalForm() {
       }
       setTitle("");
       setNote("");
+      setTargetDate("");
       router.refresh();
     });
   }
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 8, display: "flex", gap: 6 }}>
+    <form
+      onSubmit={submit}
+      style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}
+    >
       <input
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="New goal"
         maxLength={200}
-        style={{ flex: 1 }}
+        style={{ flex: "1 1 160px" }}
       />
       <input
         type="text"
@@ -220,7 +260,13 @@ function AddGoalForm() {
         onChange={(e) => setNote(e.target.value)}
         placeholder="Note"
         maxLength={1000}
-        style={{ flex: 1 }}
+        style={{ flex: "1 1 160px" }}
+      />
+      <input
+        type="date"
+        value={targetDate}
+        onChange={(e) => setTargetDate(e.target.value)}
+        aria-label="Target date"
       />
       <button type="submit" disabled={pending || title.trim().length === 0}>
         {pending ? "…" : "Add"}

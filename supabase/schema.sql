@@ -178,6 +178,7 @@ create table public.goals (
   id           uuid primary key default gen_random_uuid(),
   title        text not null,
   note         text,
+  target_date  date,
   completed_at timestamptz,
   position     int  not null default 0,
   created_at   timestamptz not null default now(),

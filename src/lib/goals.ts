@@ -10,9 +10,21 @@ export type Goal = {
   id: string;
   title: string;
   note: string | null;
+  target_date: string | null;
   completed_at: string | null;
   position: number;
 };
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeDate(input: unknown): string | null | undefined {
+  if (input === null) return null;
+  if (typeof input !== "string") return undefined;
+  const t = input.trim();
+  if (t.length === 0) return null;
+  if (!DATE_RE.test(t)) return undefined;
+  return t;
+}
 
 export type Result = { ok: true } | { ok: false; error: string };
 
@@ -30,7 +42,7 @@ export async function listGoals(): Promise<Goal[]> {
   const supabase = getPublicSupabase();
   const { data } = await supabase
     .from("goals")
-    .select("id, title, note, completed_at, position")
+    .select("id, title, note, target_date, completed_at, position")
     .order("position", { ascending: true })
     .order("created_at", { ascending: true });
   return (data ?? []) as Goal[];
@@ -39,6 +51,7 @@ export async function listGoals(): Promise<Goal[]> {
 export async function createGoal(input: {
   title: string;
   note?: string;
+  target_date?: string | null;
 }): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
@@ -50,6 +63,10 @@ export async function createGoal(input: {
     typeof input.note === "string" && input.note.trim().length > 0
       ? input.note.trim().slice(0, MAX_NOTE)
       : null;
+  const target_date = normalizeDate(input.target_date ?? null);
+  if (target_date === undefined) {
+    return { ok: false, error: "Target date must be YYYY-MM-DD." };
+  }
 
   // Place at end.
   const { data: last } = await svc
@@ -60,14 +77,20 @@ export async function createGoal(input: {
     .maybeSingle();
   const position = (last?.position ?? -1) + 1;
 
-  const { error } = await svc.from("goals").insert({ title, note, position });
+  const { error } = await svc
+    .from("goals")
+    .insert({ title, note, target_date, position });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
 export async function updateGoal(
   id: string,
-  input: { title?: string; note?: string | null },
+  input: {
+    title?: string;
+    note?: string | null;
+    target_date?: string | null;
+  },
 ): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
@@ -84,6 +107,13 @@ export async function updateGoal(
   } else if (typeof input.note === "string") {
     const n = input.note.trim();
     patch.note = n.length === 0 ? null : n.slice(0, MAX_NOTE);
+  }
+  if (input.target_date !== undefined) {
+    const d = normalizeDate(input.target_date);
+    if (d === undefined) {
+      return { ok: false, error: "Target date must be YYYY-MM-DD." };
+    }
+    patch.target_date = d;
   }
   if (Object.keys(patch).length === 0) return { ok: true };
 
