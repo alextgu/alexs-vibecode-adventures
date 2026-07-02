@@ -8,19 +8,30 @@ import {
 import { TIMEZONE } from "@/lib/config";
 import { todayInTz } from "@/lib/dates";
 
-export type DailyGoal = {
+export type AdminTodo = {
   id: string;
   title: string;
   note: string | null;
+  target_date: string | null;
+  completed_on: string | null;
   position: number;
-  /** Whether this goal was completed on the date we asked about. */
-  completed: boolean;
 };
 
 export type Result = { ok: true } | { ok: false; error: string };
 
-const MAX_TITLE = 200;
+// Keep it tight — the list lives below the calendar and gets crowded fast.
+const MAX_TITLE = 80;
 const MAX_NOTE = 500;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeDate(input: unknown): string | null | undefined {
+  if (input === null) return null;
+  if (typeof input !== "string") return undefined;
+  const t = input.trim();
+  if (t.length === 0) return null;
+  if (!DATE_RE.test(t)) return undefined;
+  return t;
+}
 
 async function requireAdmin(): Promise<Result | null> {
   if (!(await isAdminRequest())) {
@@ -29,39 +40,20 @@ async function requireAdmin(): Promise<Result | null> {
   return null;
 }
 
-/**
- * List daily goals with a flag for whether they've been done on `date`.
- * Defaults to today. Pass an ISO date to look up any other day.
- */
-export async function listDailyGoals(date?: string): Promise<DailyGoal[]> {
-  const targetDate = date ?? (await todayInTz(TIMEZONE));
+export async function listAdminTodos(): Promise<AdminTodo[]> {
   const supabase = getPublicSupabase();
-  const [{ data: goals }, { data: completions }] = await Promise.all([
-    supabase
-      .from("daily_goals")
-      .select("id, title, note, position")
-      .order("position", { ascending: true })
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("daily_goal_completions")
-      .select("daily_goal_id")
-      .eq("date", targetDate),
-  ]);
-
-  const done = new Set<string>();
-  for (const c of (completions ?? []) as { daily_goal_id: string }[]) {
-    done.add(c.daily_goal_id);
-  }
-
-  return ((goals ?? []) as Omit<DailyGoal, "completed">[]).map((g) => ({
-    ...g,
-    completed: done.has(g.id),
-  }));
+  const { data } = await supabase
+    .from("admin_todos")
+    .select("id, title, note, target_date, completed_on, position")
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: true });
+  return (data ?? []) as AdminTodo[];
 }
 
-export async function createDailyGoal(input: {
+export async function createAdminTodo(input: {
   title: string;
   note?: string;
+  target_date?: string | null;
 }): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
@@ -73,9 +65,13 @@ export async function createDailyGoal(input: {
     typeof input.note === "string" && input.note.trim().length > 0
       ? input.note.trim().slice(0, MAX_NOTE)
       : null;
+  const target_date = normalizeDate(input.target_date ?? null);
+  if (target_date === undefined) {
+    return { ok: false, error: "Date must be YYYY-MM-DD." };
+  }
 
   const { data: last } = await svc
-    .from("daily_goals")
+    .from("admin_todos")
     .select("position")
     .order("position", { ascending: false })
     .limit(1)
@@ -83,15 +79,19 @@ export async function createDailyGoal(input: {
   const position = (last?.position ?? -1) + 1;
 
   const { error } = await svc
-    .from("daily_goals")
-    .insert({ title, note, position });
+    .from("admin_todos")
+    .insert({ title, note, target_date, position });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
-export async function updateDailyGoal(
+export async function updateAdminTodo(
   id: string,
-  input: { title?: string; note?: string | null },
+  input: {
+    title?: string;
+    note?: string | null;
+    target_date?: string | null;
+  },
 ): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
@@ -109,51 +109,47 @@ export async function updateDailyGoal(
     const n = input.note.trim();
     patch.note = n.length === 0 ? null : n.slice(0, MAX_NOTE);
   }
+  if (input.target_date !== undefined) {
+    const d = normalizeDate(input.target_date);
+    if (d === undefined) {
+      return { ok: false, error: "Date must be YYYY-MM-DD." };
+    }
+    patch.target_date = d;
+  }
   if (Object.keys(patch).length === 0) return { ok: true };
 
-  const { error } = await svc.from("daily_goals").update(patch).eq("id", id);
+  const { error } = await svc.from("admin_todos").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
-export async function deleteDailyGoal(id: string): Promise<Result> {
+export async function toggleAdminTodo(id: string): Promise<Result> {
   const gate = await requireAdmin();
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  const { error } = await svc.from("daily_goals").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
-  return { ok: true };
-}
-
-/** Check or uncheck a daily goal for TODAY. Past days are read-only. */
-export async function toggleDailyGoalToday(id: string): Promise<Result> {
-  const gate = await requireAdmin();
-  if (gate) return gate;
-  const svc = getServiceSupabase();
-
-  const date = await todayInTz(TIMEZONE);
-  const { data: existing } = await svc
-    .from("daily_goal_completions")
-    .select("id")
-    .eq("daily_goal_id", id)
-    .eq("date", date)
+  const { data: row } = await svc
+    .from("admin_todos")
+    .select("completed_on")
+    .eq("id", id)
     .maybeSingle();
+  if (!row) return { ok: false, error: "Todo not found." };
 
-  if (existing) {
-    const { error } = await svc
-      .from("daily_goal_completions")
-      .delete()
-      .eq("id", existing.id);
-    if (error) return { ok: false, error: error.message };
-    return { ok: true };
-  }
-
+  const next = row.completed_on ? null : await todayInTz(TIMEZONE);
   const { error } = await svc
-    .from("daily_goal_completions")
-    .insert({ daily_goal_id: id, date });
-  if (error && error.code !== "23505") {
-    return { ok: false, error: error.message };
-  }
+    .from("admin_todos")
+    .update({ completed_on: next })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function deleteAdminTodo(id: string): Promise<Result> {
+  const gate = await requireAdmin();
+  if (gate) return gate;
+  const svc = getServiceSupabase();
+
+  const { error } = await svc.from("admin_todos").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }

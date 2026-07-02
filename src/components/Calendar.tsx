@@ -11,6 +11,7 @@ export function Calendar({
   selectedDate,
   totalRules,
   goalsByDate,
+  todosByDate,
 }: {
   ym: string;
   label: string;
@@ -18,6 +19,7 @@ export function Calendar({
   selectedDate: string;
   totalRules: number;
   goalsByDate: Record<string, string[]>;
+  todosByDate: Record<string, string[]>;
 }) {
   const prev = prevMonth(ym);
   const next = nextMonth(ym);
@@ -61,6 +63,7 @@ export function Calendar({
             ym={ym}
             totalRules={totalRules}
             goalTitles={goalsByDate[c.date] ?? []}
+            todoTitles={todosByDate[c.date] ?? []}
           />
         ))}
       </div>
@@ -74,12 +77,14 @@ function DayCell({
   ym,
   totalRules,
   goalTitles,
+  todoTitles,
 }: {
   cell: MonthCell;
   selectedDate: string;
   ym: string;
   totalRules: number;
   goalTitles: string[];
+  todoTitles: string[];
 }) {
   const { day, day_of_month, in_month, date } = cell;
   const isSelected = date === selectedDate;
@@ -182,25 +187,46 @@ function DayCell({
           }}
         />
       )}
-      {in_month && goalTitles.length > 0 && (
+      {in_month && (goalTitles.length > 0 || todoTitles.length > 0) && (
         <div
-          title={goalTitles.join("\n")}
           style={{
             position: "absolute",
             left: 4,
             right: 4,
             bottom: 3,
             fontSize: 9,
-            lineHeight: 1.1,
+            lineHeight: 1.15,
             fontWeight: 600,
             overflow: "hidden",
-            whiteSpace: "nowrap",
-            textOverflow: "ellipsis",
             opacity: 0.85,
           }}
         >
-          ★ {goalTitles[0]}
-          {goalTitles.length > 1 ? ` +${goalTitles.length - 1}` : ""}
+          {goalTitles.length > 0 && (
+            <div
+              title={goalTitles.join("\n")}
+              style={{
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+              }}
+            >
+              ★ {goalTitles[0]}
+              {goalTitles.length > 1 ? ` +${goalTitles.length - 1}` : ""}
+            </div>
+          )}
+          {todoTitles.length > 0 && (
+            <div
+              title={todoTitles.join("\n")}
+              style={{
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+              }}
+            >
+              ✓ {todoTitles[0]}
+              {todoTitles.length > 1 ? ` +${todoTitles.length - 1}` : ""}
+            </div>
+          )}
         </div>
       )}
     </Link>

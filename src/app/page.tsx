@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getHomeData, getDiary } from "@/lib/challenges";
 import { listGoals } from "@/lib/goals";
 import { listDailyGoals } from "@/lib/daily-goals";
+import { listAdminTodos } from "@/lib/admin-todos";
 import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
@@ -11,6 +12,7 @@ import { ModalShell } from "@/components/ModalShell";
 import { GoalsSection } from "@/components/GoalsSection";
 import { DailyGoalsSection } from "@/components/DailyGoalsSection";
 import { DailyGoalsInModal } from "@/components/DailyGoalsInModal";
+import { AdminTodosSection } from "@/components/AdminTodosSection";
 
 export default async function Home({
   searchParams,
@@ -18,10 +20,11 @@ export default async function Home({
   searchParams: Promise<{ ym?: string; d?: string }>;
 }) {
   const sp = await searchParams;
-  const [data, goals, dailyGoals] = await Promise.all([
+  const [data, goals, dailyGoals, adminTodos] = await Promise.all([
     getHomeData({ ym: sp.ym, d: sp.d }),
     listGoals(),
     listDailyGoals(),
+    listAdminTodos(),
   ]);
 
   const isAdmin = data.is_admin;
@@ -42,6 +45,13 @@ export default async function Home({
   for (const g of goals) {
     if (g.target_date) {
       (goalsByDate[g.target_date] ??= []).push(g.title);
+    }
+  }
+
+  const todosByDate: Record<string, string[]> = {};
+  for (const t of adminTodos) {
+    if (t.completed_on) {
+      (todosByDate[t.completed_on] ??= []).push(t.title);
     }
   }
 
@@ -91,7 +101,10 @@ export default async function Home({
         selectedDate={modalOpen ? data.selected.date : ""}
         totalRules={data.rules.length}
         goalsByDate={goalsByDate}
+        todosByDate={todosByDate}
       />
+
+      {isAdmin && <AdminTodosSection todos={adminTodos} />}
 
       {modalOpen && (
         <ModalShell closeHref={closeHref}>

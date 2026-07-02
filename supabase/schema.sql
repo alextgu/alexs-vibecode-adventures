@@ -248,3 +248,34 @@ create policy "public_select" on public.daily_goal_completions for select using 
 
 revoke all on public.daily_goal_completions from anon, authenticated;
 grant select on public.daily_goal_completions to anon, authenticated;
+
+-- Admin todo list — a lightweight notepad/checklist for the admin.
+-- Independent of everything else. Optional target_date. Once completed, the
+-- title is shown on the calendar on `completed_on` (description stays private).
+drop table if exists public.admin_todos;
+create table public.admin_todos (
+  id           uuid primary key default gen_random_uuid(),
+  title        text not null,
+  note         text,
+  target_date  date,
+  completed_on date,
+  position     int  not null default 0,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+drop trigger if exists admin_todos_set_updated_at on public.admin_todos;
+create trigger admin_todos_set_updated_at
+  before update on public.admin_todos
+  for each row execute function public.set_updated_at();
+
+create index admin_todos_position_idx on public.admin_todos (position, created_at);
+create index admin_todos_completed_on_idx on public.admin_todos (completed_on);
+
+alter table public.admin_todos enable row level security;
+
+drop policy if exists "public_select" on public.admin_todos;
+create policy "public_select" on public.admin_todos for select using (true);
+
+revoke all on public.admin_todos from anon, authenticated;
+grant select on public.admin_todos to anon, authenticated;

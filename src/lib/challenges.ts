@@ -332,7 +332,7 @@ export async function getHomeData(input?: {
   d?: string;
 }): Promise<HomeData> {
   const isAdmin = await isAdminRequest();
-  const today = todayInTz(TIMEZONE);
+  const today = await todayInTz(TIMEZONE);
 
   const rawAttempt = await loadActive();
   const checksByDate = rawAttempt
@@ -421,11 +421,12 @@ async function getOrCreateActiveForToday(
 
   if (data) {
     const tz = (data.timezone as string) || TIMEZONE;
-    if (date !== todayInTz(tz)) return { error: "You can only edit today." };
+    if (date !== (await todayInTz(tz)))
+      return { error: "You can only edit today." };
     return { challengeId: data.id as string };
   }
 
-  if (date !== todayInTz(TIMEZONE)) {
+  if (date !== (await todayInTz(TIMEZONE))) {
     return { error: "You can only edit today." };
   }
   const { data: created, error: cErr } = await svc
@@ -495,7 +496,7 @@ export async function uncheckRule(
     .eq("status", "active")
     .maybeSingle();
   if (!active) return { ok: false, error: "No active attempt." };
-  if (date !== todayInTz((active.timezone as string) || TIMEZONE)) {
+  if (date !== (await todayInTz((active.timezone as string) || TIMEZONE))) {
     return { ok: false, error: "You can only edit today." };
   }
 
@@ -523,7 +524,7 @@ export async function abandonAttempt(): Promise<Result> {
 
   if (!row) return { ok: false, error: "No active attempt." };
 
-  const today = todayInTz((row.timezone as string) || TIMEZONE);
+  const today = await todayInTz((row.timezone as string) || TIMEZONE);
   const { error } = await svc
     .from("challenges")
     .update({ status: "failed", failed_on_date: today })
@@ -553,7 +554,7 @@ export async function saveDiary(
   if (gate) return gate;
   const svc = getServiceSupabase();
 
-  if (date !== todayInTz(TIMEZONE)) {
+  if (date !== (await todayInTz(TIMEZONE))) {
     return { ok: false, error: "You can only write today's diary." };
   }
 
