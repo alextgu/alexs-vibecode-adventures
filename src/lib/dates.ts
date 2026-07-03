@@ -1,44 +1,15 @@
 /**
- * Fetches the current UTC time from a public time API so the app's notion of
- * "today" doesn't depend on a possibly-wrong server clock. Falls back to the
- * system clock if the API is unreachable. Cached briefly to avoid hammering.
- */
-async function getUtcNow(): Promise<Date> {
-  try {
-    const res = await fetch(
-      "https://timeapi.io/api/Time/current/zone?timeZone=Etc/UTC",
-      { next: { revalidate: 60 } },
-    );
-    if (!res.ok) throw new Error(`time api ${res.status}`);
-    const j = (await res.json()) as {
-      year: number;
-      month: number;
-      day: number;
-      hour: number;
-      minute: number;
-      seconds: number;
-    };
-    return new Date(
-      Date.UTC(j.year, j.month - 1, j.day, j.hour, j.minute, j.seconds),
-    );
-  } catch {
-    return new Date();
-  }
-}
-
-/**
  * Returns today's ISO date (YYYY-MM-DD) in the given IANA timezone.
- * Uses Intl.DateTimeFormat with en-CA locale which formats as YYYY-MM-DD.
+ * Uses the server clock directly — NTP-synced on Vercel / Node hosts.
  */
 export async function todayInTz(timeZone: string): Promise<string> {
-  const now = await getUtcNow();
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  return fmt.format(now);
+  return fmt.format(new Date());
 }
 
 /** Adds `days` (may be negative) to an ISO date string. Returns YYYY-MM-DD. */
