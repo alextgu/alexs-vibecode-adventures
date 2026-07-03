@@ -7,7 +7,6 @@ import { Calendar } from "@/components/Calendar";
 import { ChecklistRow } from "@/components/ChecklistRow";
 import { DiaryEditor } from "@/components/DiaryEditor";
 import { LockButton } from "@/components/LockButton";
-import { AbandonAttemptButton } from "@/components/AttemptControls";
 import { ModalShell } from "@/components/ModalShell";
 import { GoalsSection } from "@/components/GoalsSection";
 import { DailyGoalsSection } from "@/components/DailyGoalsSection";
@@ -169,7 +168,6 @@ function StreakBanner({
           </div>
           <MetaLines startedOn={attempt.start_date} longest={longest} />
         </div>
-        {isAdmin && <AbandonAttemptButton />}
       </section>
     );
   }

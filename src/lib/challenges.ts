@@ -351,10 +351,18 @@ export async function getHomeData(input?: {
     );
   }
 
-  const currentDay =
-    attempt && attempt.status === "active"
-      ? daysBetween(attempt.start_date, today) + 1
-      : null;
+  let currentDay: number | null = null;
+  if (attempt && attempt.status === "active") {
+    let streak = 0;
+    for (let i = 0; ; i++) {
+      const d = addDays(attempt.start_date, i);
+      if (d > today) break;
+      const count = checksByDate.get(d)?.size ?? 0;
+      if (count >= RULES.length) streak++;
+      else break;
+    }
+    currentDay = streak;
+  }
 
   const history = await loadHistorySummary(today);
 
@@ -385,7 +393,7 @@ export async function getHomeData(input?: {
       ? {
           ...attempt,
           current_day:
-            attempt.status === "active" && currentDay ? currentDay : null,
+            attempt.status === "active" ? currentDay : null,
         }
       : null,
     history,
