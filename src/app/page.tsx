@@ -12,6 +12,7 @@ import { GoalsSection } from "@/components/GoalsSection";
 import { DailyGoalsSection } from "@/components/DailyGoalsSection";
 import { DailyGoalsInModal } from "@/components/DailyGoalsInModal";
 import { AdminTodosSection } from "@/components/AdminTodosSection";
+import { SaveScoreButton } from "@/components/SaveScoreButton";
 
 export default async function Home({
   searchParams,
@@ -272,18 +273,29 @@ function SelectedDayPanel({
       )}
 
       <div style={{ marginBottom: 16 }}>
-        {data.rules.map((r) => (
-          <ChecklistRow
-            key={r.id}
-            ruleId={r.id}
-            label={r.label}
-            date={s.date}
-            checked={s.checked.includes(r.id)}
-            disabled={!canEdit}
-            auto={r.auto === "diary"}
-          />
-        ))}
+        {data.rules
+          .filter((r) => isAdmin || r.auto !== "diary")
+          .map((r) => (
+            <ChecklistRow
+              key={r.id}
+              ruleId={r.id}
+              label={r.label}
+              date={s.date}
+              checked={s.checked.includes(r.id)}
+              disabled={!canEdit}
+              auto={r.auto === "diary"}
+            />
+          ))}
       </div>
+
+      {canEdit && (
+        <SaveScoreButton
+          date={s.date}
+          rules={data.rules
+            .filter((r) => r.auto !== "diary")
+            .map((r) => ({ id: r.id, checked: s.checked.includes(r.id) }))}
+        />
+      )}
 
       <DailyGoalsInModal goals={selectedDailyGoals} canEdit={canEdit} />
 
